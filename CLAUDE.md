@@ -1,6 +1,6 @@
-# CLAUDE.md — Claims Platform (repository root)
+# CLAUDE.md — Claims Platform Repository Guide
 
-Guidance for Claude Code (and any human) working in this repository. This is an index; the detailed rules live next to the code.
+Internal development guidance for AI coding assistants and contributors. This file is a repository index; implementation-specific guidance lives beside each application. It is not a substitute for the client-facing README or architecture document.
 
 ## What this is
 

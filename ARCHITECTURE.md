@@ -1,4 +1,6 @@
-# Architecture and Design Decisions
+# Claims Platform — Architecture and Design Decisions
+
+This document describes the implemented application structure, the main engineering choices, integration boundaries, and known gaps. It distinguishes current behaviour from recommended future work.
 
 A claims platform: claimants report and track incidents, officers work claims to a decision and settlement, managers see
 workload, liability and performance. It is delivered as **one repository with two applications** that meet at a single
@@ -42,12 +44,11 @@ contract, the HTTP API.
 them. Where the backend lacks something the UI would like (CORS, an officers endpoint, "allowed actions", a currency), the UI works
 around it and the gap is written down in [part D](#part-d-integration-decisions) and [part E](#part-e-known-limitations-and-next-steps).
 
-**Containers.** `docker-compose.yml` runs three long-lived containers and one setup job: Kafka (single node, KRaft), the backend
+**Container design (execution not yet verified).** `docker-compose.yml` is configured for three long-lived containers and one setup job: Kafka (single node, KRaft), the backend
 (`EVENTS_PUBLISHER=kafka`, same in-memory H2 database, H2 console enabled, `restart: unless-stopped`), the frontend (nginx), and
 `kafka-init`, which creates the topic. In this layout nginx plays the role of the dev proxy: the browser only talks to port 4200 and nginx
 forwards `/api/` to the backend, so the backend's missing CORS configuration still does not matter (see D.2). Details and the Kafka
-configuration check are in [DOCKER.md](DOCKER.md). The Docker files were written without Docker available to the AI and no run result
-is recorded yet (see `AI_JOURNAL.md` F5).
+configuration check are in [DOCKER.md](DOCKER.md). The available development record does not include a successful image build or container run (see `AI_JOURNAL.md`).
 
 **One app, three roles.** The brief asks for both user types to use the same Angular application. The JWT carries the role;
 the shell shows role-specific navigation and each page is behind a role guard.
@@ -187,9 +188,7 @@ JWT (HS256) in `Authorization: Bearer`, stateless; BCrypt passwords; method secu
 Other claimants' or officers' claims return **404**, not 403, so existence is not leaked. Public registration can only
 create claimants.
 
-Reachable **without a token**: `POST /api/auth/register` and `/login`, Swagger UI and the OpenAPI document, `/error`, and the **H2
-console** (`/h2-console/**`, enabled with `web-allow-others` for local development). The console lets anyone who can reach the port read and
-change the database, so it must be switched off (`spring.h2.console.enabled=false`) before any shared deployment.
+Reachable **without an application token**: `POST /api/auth/register` and `/login`, Swagger UI and the OpenAPI document, `/error`, and the **H2 console** (`/h2-console/**`, enabled with `web-allow-others` in the documented local configuration). Anyone who can reach the console may be able to read or change the database. Disable it (`spring.h2.console.enabled=false`) and remove or restrict its security exception before any shared deployment.
 
 ### B.6 Error model
 RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map for field validation.
@@ -351,6 +350,8 @@ be found." (404). After a failed action the claim is reloaded so the screen show
 ---
 
 ## Part E: Known limitations and next steps
+
+The items below are current gaps or verification requirements, not claims that the proposed follow-up work has already been completed. The container stack and real-broker Kafka path should be treated as unverified until a successful run is recorded.
 
 ### Backend (deliberate, for the sprint)
 | Limitation | Next step |
