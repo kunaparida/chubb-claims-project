@@ -1,0 +1,412 @@
+=====================================================================
+ SWAGGER TEST GUIDE - CLAIMS MANAGEMENT API (sequence wise)
+=====================================================================
+Swagger UI : http://localhost:8080/swagger-ui.html
+OpenAPI    : http://localhost:8080/v3/api-docs
+H2 console : http://localhost:8080/h2-console
+             JDBC URL jdbc:h2:mem:claimsdb | user sa | password (empty)
+
+How to use this guide
+  - Run the steps in order. Each step has: ENDPOINT, WHO (token to
+    use), PAYLOAD, EXPECTED result and SAY (what to explain).
+  - Start from a FRESHLY STARTED app so the first claim gets id 1 and
+    the second gets id 2 (the guide uses these ids). If you do not
+    start fresh, use the ids returned in your own responses.
+  - H2 is in memory: data is lost on every restart.
+  - Use today's date (or earlier) for incidentDate. This guide uses
+    2026-10-14. A future date is rejected.
+
+---------------------------------------------------------------------
+ SETUP: HOW TO AUTHORIZE IN SWAGGER (do this before each role)
+---------------------------------------------------------------------
+ 1. Run the login/register call for that user.
+ 2. Copy ONLY the value of "token" (the long string starting eyJ...).
+    Do not copy the word Bearer, quotes or other JSON.
+ 3. Click the green "Authorize" button (top right), paste the token,
+    click Authorize, then Close.
+ 4. To switch user: Authorize -> Logout -> paste the next token.
+ Tokens last 24 hours (JWT_EXPIRATION_MS default 86400000).
+
+ Accounts
+   Manager  manager@claims.local   ChangeMe123!
+   Officer  officer@claims.local   ChangeMe123!
+   Claimant (none seeded)          register in step 1
+
+=====================================================================
+ PHASE 1 - ACCOUNTS AND TOKENS
+=====================================================================
+
+STEP 1  Register a claimant
+  ENDPOINT : POST /api/auth/register          (no token needed)
+  PAYLOAD  :
+  {
+    "email": "jane@example.com",
+    "password": "Claimant123!",
+    "fullName": "Jane Doe"
+  }
+  EXPECTED : 201 Created, body has "token" and role CLAIMANT.
+  ACTION   : Copy the token. This is the CLAIMANT token.
+  DESC      : "Public registration only ever creates claimants. Staff
+             accounts are created by the system, so nobody can
+             register themselves as an officer or manager."
+
+STEP 2  Register again with the same email (negative test)
+  ENDPOINT : POST /api/auth/register
+  PAYLOAD  : same as step 1
+  EXPECTED : 409 Conflict (problem details, "status": 409).
+  DESC      : "Errors follow RFC 7807 problem details."
+
+STEP 3  Login as officer
+  ENDPOINT : POST /api/auth/login             (no token needed)
+  PAYLOAD  :
+  {
+    "email": "officer@claims.local",
+    "password": "ChangeMe123!"
+  }
+  EXPECTED : 200 OK with "token" and "userId".
+  ACTION   : Copy the OFFICER token. WRITE DOWN userId (example: 2).
+             You need it as officerId in step 14.
+
+STEP 4  Login as manager
+  ENDPOINT : POST /api/auth/login
+  PAYLOAD  :
+  {
+    "email": "manager@claims.local",
+    "password": "ChangeMe123!"
+  }
+  EXPECTED : 200 OK. ACTION: copy the MANAGER token.
+
+STEP 5  Wrong password (negative test)
+  ENDPOINT : POST /api/auth/login
+  PAYLOAD  :
+  {
+    "email": "officer@claims.local",
+    "password": "wrong-password"
+  }
+  EXPECTED : 401 Unauthorized.
+  DESC      : "Same message for unknown email and bad password, so an
+             attacker cannot tell which one was wrong."
+
+STEP 6  Who am I
+  WHO      : CLAIMANT token (Authorize first)
+  ENDPOINT : GET /api/auth/me
+  EXPECTED : 200 OK with your id, email, fullName, role CLAIMANT.
+
+=====================================================================
+ PHASE 2 - CLAIMANT SUBMITS CLAIMS      (Authorize as CLAIMANT)
+=====================================================================
+
+STEP 7  Submit claim 1 (will go through approval and settlement)
+  ENDPOINT : POST /api/claims
+  PAYLOAD  :
+  {
+    "policyNumber": "POL-2026-00042",
+    "claimantName": "Jane Doe",
+    "claimantEmail": "jane@example.com",
+    "incidentDate": "2026-10-14",
+    "description": "Water damage to the kitchen from a burst pipe.",
+    "amountClaimed": 1250.00,
+    "claimType": "PROPERTY",
+    "market": "hk"
+  }
+  EXPECTED : 201 Created.
+             status SUBMITTED, id 1, claimNumber CLM-..., claimType
+             PROPERTY, market "HK" (normalised to upper case).
+  RULES    : claimantEmail MUST equal the logged-in account email.
+             description needs at least 20 characters.
+             amountClaimed > 0, at most 2 decimals.
+             claimType is MOTOR or PROPERTY. market is 2 letters.
+  DESC      : "The claim starts as SUBMITTED. Type and market drive
+             the liability breakdown the manager sees later."
+
+STEP 8  Submit claim 2 (will be rejected later)
+  ENDPOINT : POST /api/claims
+  PAYLOAD  :
+  {
+    "policyNumber": "POL-2026-00043",
+    "claimantName": "Jane Doe",
+    "claimantEmail": "jane@example.com",
+    "incidentDate": "2026-10-14",
+    "description": "Rear bumper damage from a parking collision.",
+    "amountClaimed": 275.50,
+    "claimType": "MOTOR",
+    "market": "SG"
+  }
+  EXPECTED : 201 Created, id 2.
+
+STEP 9  Validation failure (negative test)
+  ENDPOINT : POST /api/claims
+  PAYLOAD  :
+  {
+    "policyNumber": "",
+    "claimantName": "Jane Doe",
+    "claimantEmail": "jane@example.com",
+    "incidentDate": "2999-01-01",
+    "description": "too short",
+    "amountClaimed": 0,
+    "claimType": "MOTOR",
+    "market": "SGP"
+  }
+  EXPECTED : 400 Bad Request with an "errors" map listing
+             policyNumber, incidentDate, description, amountClaimed
+             and market.
+  DESC      : "Bean validation runs at the edge and every broken field
+             is reported in one response."
+
+STEP 10 Spoofed email (negative test)
+  ENDPOINT : POST /api/claims
+  PAYLOAD  : same as step 7 but "claimantEmail": "someone@else.com"
+  EXPECTED : 403 Forbidden.
+  DESC      : "A claimant can only submit on their own account."
+
+STEP 11 Track my claims
+  ENDPOINT : GET /api/claims          page = 0, size = 20
+  EXPECTED : 200 OK, paged list with both claims
+             (content, page, size, totalElements, totalPages).
+  ENDPOINT : GET /api/claims/1
+  EXPECTED : 200 OK, full claim 1, status SUBMITTED.
+  ENDPOINT : GET /api/claims/1/history
+  EXPECTED : 200 OK, one entry: fromStatus null -> SUBMITTED,
+             note "Claim submitted".
+  DESC      : "Every status change is recorded in an audit trail."
+
+STEP 12 Claimant cannot see the staff queue (negative test)
+  ENDPOINT : GET /api/claims/queue
+  EXPECTED : 403 Forbidden.
+
+=====================================================================
+ PHASE 3 - OFFICER PICKS UP WORK      (Authorize as OFFICER)
+=====================================================================
+
+STEP 13 See the work queue
+  ENDPOINT : GET /api/claims/queue     page = 0, size = 20
+  EXPECTED : 200 OK, claims 1 and 2 (unassigned, SUBMITTED), oldest
+             first.
+  DESC     : "This is what an officer needs to retrieve efficiently:
+             what is waiting, in the order it arrived."
+
+STEP 14 Pick up claim 2
+  ENDPOINT : PUT /api/claims/2/pickup           (no body)
+  EXPECTED : 200 OK, assignedOfficerId = the officer id.
+  DESC      : "The officer takes work from the queue. Another officer
+             cannot take a claim that is already assigned (409)."
+
+  Then (Authorize as MANAGER) assign claim 1 to the officer:
+  ENDPOINT : PUT /api/claims/1/assign
+  PAYLOAD  :
+  {
+    "officerId": 2
+  }
+  (use the userId you wrote down in step 3)
+  EXPECTED : 200 OK, assignedOfficerId = 2.
+  DESC      : "Managers can allocate work; officers can only assign
+             to themselves."
+
+STEP 15 Manager looks at exposure BEFORE decisions    (as MANAGER)
+  ENDPOINT : GET /api/dashboard/workload
+  EXPECTED : submitted = 2, unassigned = 0.
+  ENDPOINT : GET /api/dashboard/liability
+  EXPECTED : pendingExposure 1525.50, plus byClaimType
+             (MOTOR 275.50, PROPERTY 1250.00) and byMarket
+             (HK 1250.00, SG 275.50).
+  DESC      : "This answers 'what is our outstanding liability
+             exposure', and it is split by line of business and
+             market." (Do this now: after approval and settlement the
+             pending figures go to zero.)
+
+=====================================================================
+ PHASE 4 - REVIEW, INFORMATION REQUEST, DECISION (claim 1)
+=====================================================================
+
+STEP 16 Begin review                    (Authorize as OFFICER)
+  ENDPOINT : PUT /api/claims/1/review           (no body)
+  EXPECTED : 200 OK, status UNDER_REVIEW.
+
+STEP 17 Request more information
+  ENDPOINT : PUT /api/claims/1/request-info
+  PAYLOAD  :
+  {
+    "note": "Please provide the repair estimate and plumber report."
+  }
+  EXPECTED : 200 OK, status MORE_INFO_REQUIRED, informationRequest set.
+
+STEP 18 Officer cannot answer for the claimant (negative test)
+  ENDPOINT : PUT /api/claims/1/provide-info     (as OFFICER)
+  PAYLOAD  :
+  {
+    "response": "Officer trying to answer"
+  }
+  EXPECTED : 403 Forbidden.
+
+STEP 19 Claimant provides the information    (Authorize as CLAIMANT)
+  ENDPOINT : PUT /api/claims/1/provide-info
+  PAYLOAD  :
+  {
+    "response": "Repair estimate of 900 HKD and the plumber report are attached."
+  }
+  EXPECTED : 200 OK, status back to UNDER_REVIEW, informationRequest
+             and informationResponse both stored.
+  DESC      : "The claimant answers when asked, and the claim returns
+             to review automatically."
+
+STEP 20 Answer twice (negative test)
+  ENDPOINT : PUT /api/claims/1/provide-info     (as CLAIMANT)
+  PAYLOAD  :
+  {
+    "response": "Second answer"
+  }
+  EXPECTED : 409 Conflict ("no additional information has been
+             requested").
+
+STEP 21 Approve                         (Authorize as OFFICER)
+  ENDPOINT : PUT /api/claims/1/approve
+  PAYLOAD  :
+  {
+    "note": "Within cover. Estimate approved."
+  }
+  EXPECTED : 200 OK, status APPROVED.
+
+STEP 22 Settle
+  ENDPOINT : PUT /api/claims/1/settle
+  PAYLOAD  :
+  {
+    "note": "Payment issued to claimant."
+  }
+  EXPECTED : 200 OK, status SETTLED.
+
+STEP 23 Invalid transition (negative test)
+  ENDPOINT : PUT /api/claims/1/reject
+  PAYLOAD  :
+  {
+    "note": "Too late"
+  }
+  EXPECTED : 409 Conflict, detail "Invalid claim status transition:
+             SETTLED -> REJECTED".
+  DESC      : "The workflow is enforced in the service layer. Allowed:
+             SUBMITTED to UNDER_REVIEW; UNDER_REVIEW to MORE_INFO,
+             APPROVED or REJECTED; MORE_INFO back to UNDER_REVIEW;
+             APPROVED to SETTLED. REJECTED and SETTLED are final."
+
+=====================================================================
+ PHASE 5 - REJECTION PATH (claim 2)           (as OFFICER)
+=====================================================================
+
+STEP 24 Review claim 2
+  ENDPOINT : PUT /api/claims/2/review           (no body)
+  EXPECTED : 200 OK, UNDER_REVIEW.
+
+STEP 25 Reject claim 2
+  ENDPOINT : PUT /api/claims/2/reject
+  PAYLOAD  :
+  {
+    "note": "The incident is outside the policy coverage period."
+  }
+  EXPECTED : 200 OK, status REJECTED.
+
+STEP 26 Skipping review (optional negative test)
+  Submit a third claim as CLAIMANT (step 8 payload, new policy
+  number), pick it up, then call:
+  ENDPOINT : PUT /api/claims/3/approve   PAYLOAD {"note":"skip"}
+  EXPECTED : 409 (SUBMITTED -> APPROVED is not allowed).
+
+=====================================================================
+ PHASE 6 - AUDIT, FILTERS, DASHBOARDS
+=====================================================================
+
+STEP 27 Full history of claim 1          (as CLAIMANT or OFFICER)
+  ENDPOINT : GET /api/claims/1/history
+  EXPECTED : 6 entries in order:
+             SUBMITTED, UNDER_REVIEW, MORE_INFO_REQUIRED,
+             UNDER_REVIEW, APPROVED, SETTLED
+             with who did each and the note.
+  DESC      : "A complete audit trail, including the claimant's own
+             step."
+
+STEP 28 Filter by status                 (as OFFICER)
+  ENDPOINT : GET /api/claims?status=SETTLED
+  EXPECTED : 200 OK, only settled claims (the officer's own).
+  ENDPOINT : GET /api/claims?status=NOT_A_STATUS
+  EXPECTED : 400 Bad Request.
+
+STEP 29 Manager dashboards               (Authorize as MANAGER)
+  ENDPOINT : GET /api/dashboard/workload
+  EXPECTED : settled 1, rejected 1 (counts per status, unassigned,
+             open total).
+  ENDPOINT : GET /api/dashboard/liability
+  EXPECTED : now pending 0 (claims are decided); the breakdown lists
+             are empty because nothing is pending or approved.
+  ENDPOINT : GET /api/dashboard/performance
+  EXPECTED : the officer with assigned, active and resolved counts.
+
+STEP 30 Role checks (negative tests)
+  - As OFFICER: GET /api/dashboard/workload       -> 403
+  - As CLAIMANT: PUT /api/claims/1/approve        -> 403
+  - No token (Authorize -> Logout): GET /api/claims -> 401
+  - A second registered claimant: GET /api/claims/1 -> 404
+    (404 not 403, so the claim's existence is not revealed)
+
+=====================================================================
+ PHASE 7 - SHOW THE DATA AND THE EVENTS
+=====================================================================
+
+STEP 31 Database
+  Open http://localhost:8080/h2-console and connect
+  (jdbc:h2:mem:claimsdb, sa, empty password). Run:
+    SELECT * FROM users;
+    SELECT * FROM claims;
+    SELECT * FROM claim_status_history ORDER BY id;
+    SELECT * FROM outbox_events ORDER BY id;
+  DESC: "The history table is the audit trail. The outbox table holds
+       one ClaimStatusChanged event per status change, written in the
+       same transaction as the change."
+
+STEP 32 Events
+  Look at the application console. About every 5 seconds you will see
+  lines like:  EVENT topic=claims.claim-status-changed key=1 payload=...
+  Then run in H2:  SELECT id, publishedAt FROM outbox_events;
+  publishedAt is now filled in.
+  DESC: "By default events go to the log so the app runs without a
+       broker. Setting app.events.publisher=kafka and
+       spring.kafka.bootstrap-servers publishes to Kafka instead. I
+       tested the Kafka publisher with a mock, not a real broker."
+
+=====================================================================
+ QUICK REFERENCE - ALL ENDPOINTS
+=====================================================================
+ Who     Method Path                           Body
+ ------  ------ -----------------------------  -------------------------
+ public  POST   /api/auth/register             email, password, fullName
+ public  POST   /api/auth/login                email, password
+ any     GET    /api/auth/me                   -
+ claim.  POST   /api/claims                    claim details (see step 7)
+ any     GET    /api/claims?status=&page=&size= -
+ any     GET    /api/claims/{id}               -
+ any     GET    /api/claims/{id}/history       -
+ off/mgr GET    /api/claims/queue?page=&size=  -
+ officer PUT    /api/claims/{id}/pickup        -
+ off/mgr PUT    /api/claims/{id}/assign        {"officerId": n}
+ off/mgr PUT    /api/claims/{id}/review        -
+ off/mgr PUT    /api/claims/{id}/request-info  {"note": "..."}
+ claim.  PUT    /api/claims/{id}/provide-info  {"response": "..."}
+ off/mgr PUT    /api/claims/{id}/approve       {"note": "..."}
+ off/mgr PUT    /api/claims/{id}/reject        {"note": "..."}
+ off/mgr PUT    /api/claims/{id}/settle        {"note": "..."}
+ manager GET    /api/dashboard/workload        -
+ manager GET    /api/dashboard/liability       -
+ manager GET    /api/dashboard/performance     -
+
+ Status flow
+   SUBMITTED -> UNDER_REVIEW -> APPROVED -> SETTLED
+                    |  ^
+                    v  |
+            MORE_INFO_REQUIRED       UNDER_REVIEW -> REJECTED
+
+ Common problems
+   401 on any call   -> not authorized, token expired, or "Bearer "
+                        was pasted with the token.
+   403               -> the logged-in role is not allowed.
+   404 on /h2-console login page -> app not running.
+   409 on a status call -> the claim is not in the right status; read
+                        "detail" in the response.
+   400 on create     -> read the "errors" map; check claimantEmail
+                        equals the logged-in account.

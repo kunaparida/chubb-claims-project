@@ -1,0 +1,825 @@
+{
+  "info": {
+    "_postman_id": "c7a5346e-80da-49c3-a369-7ce32e7e50f3",
+    "name": "Claims Management API",
+    "description": "Run requests in collection order (Collection Runner, keep order). Auth and workflow scripts capture the JWTs, user IDs and claim IDs used by following requests. Covers: claimant submission, officer queue and pick-up, claimant information response, review/approve/settle/reject, audit history, status filter and the manager dashboards (with liability by claim type and market).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const today = new Date();",
+          "const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;",
+          "pm.collectionVariables.set('incidentDate', localDate);"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "claimantToken", "value": "" },
+    { "key": "officerToken", "value": "" },
+    { "key": "managerToken", "value": "" },
+    { "key": "officerId", "value": "" },
+    { "key": "claimId", "value": "" },
+    { "key": "rejectionClaimId", "value": "" },
+    { "key": "claimantEmail", "value": "" },
+    { "key": "incidentDate", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Register claimant",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('claimantEmail', `claimant-${Date.now()}@example.com`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Claimant registration succeeded', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('claimantToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{claimantEmail}}\",\n  \"password\": \"Claimant123!\",\n  \"fullName\": \"Sample Claimant\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/auth/register"
+          }
+        },
+        {
+          "name": "Login officer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Officer login succeeded', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('officerToken', pm.response.json().token);",
+                  "pm.collectionVariables.set('officerId', pm.response.json().userId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"officer@claims.local\",\n  \"password\": \"ChangeMe123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Login manager",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager login succeeded', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('managerToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"manager@claims.local\",\n  \"password\": \"ChangeMe123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Get current claimant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Role is CLAIMANT', () => pm.expect(pm.response.json().role).to.eql('CLAIMANT'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{claimantToken}}" }],
+            "url": "{{baseUrl}}/api/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Create claims",
+      "item": [
+        {
+          "name": "Create claim for approval and settlement (PROPERTY, HK)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Claim created', () => pm.response.to.have.status(201));",
+                  "const claim = pm.response.json();",
+                  "pm.test('Type and market stored', () => {",
+                  "  pm.expect(claim.claimType).to.eql('PROPERTY');",
+                  "  pm.expect(claim.market).to.eql('HK');",
+                  "  pm.expect(claim.status).to.eql('SUBMITTED');",
+                  "});",
+                  "pm.collectionVariables.set('claimId', claim.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{claimantToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyNumber\": \"POL-2026-00042\",\n  \"claimantName\": \"Sample Claimant\",\n  \"claimantEmail\": \"{{claimantEmail}}\",\n  \"incidentDate\": \"{{incidentDate}}\",\n  \"description\": \"Water damage to the kitchen from a burst pipe.\",\n  \"amountClaimed\": 1250.00,\n  \"claimType\": \"PROPERTY\",\n  \"market\": \"hk\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims"
+          }
+        },
+        {
+          "name": "Create claim for rejection (MOTOR, SG)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Claim created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('rejectionClaimId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{claimantToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyNumber\": \"POL-2026-00043\",\n  \"claimantName\": \"Sample Claimant\",\n  \"claimantEmail\": \"{{claimantEmail}}\",\n  \"incidentDate\": \"{{incidentDate}}\",\n  \"description\": \"A second sample incident for the rejection workflow.\",\n  \"amountClaimed\": 275.50,\n  \"claimType\": \"MOTOR\",\n  \"market\": \"SG\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims"
+          }
+        },
+        {
+          "name": "Create claim - invalid type and market (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Rejected with 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Market error reported', () => pm.expect(pm.response.json().errors).to.have.property('market'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{claimantToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyNumber\": \"POL-2026-00044\",\n  \"claimantName\": \"Sample Claimant\",\n  \"claimantEmail\": \"{{claimantEmail}}\",\n  \"incidentDate\": \"{{incidentDate}}\",\n  \"description\": \"This request has an invalid market code.\",\n  \"amountClaimed\": 10.00,\n  \"claimType\": \"MOTOR\",\n  \"market\": \"SGP\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims"
+          }
+        },
+        {
+          "name": "List claims",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Paged response', () => {",
+                  "  pm.expect(body.content).to.be.an('array');",
+                  "  pm.expect(body).to.have.property('totalElements');",
+                  "  pm.expect(body).to.have.property('totalPages');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{claimantToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims?page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims"],
+              "query": [
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get submitted claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Claim is SUBMITTED', () => pm.expect(pm.response.json().status).to.eql('SUBMITTED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{claimantToken}}" }],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Officer queue and assignment",
+      "item": [
+        {
+          "name": "Claimant cannot read the officer queue (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [ "pm.test('Forbidden', () => pm.response.to.have.status(403));" ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{claimantToken}}" }],
+            "url": "{{baseUrl}}/api/claims/queue"
+          }
+        },
+        {
+          "name": "Officer queue (unassigned claims, oldest first)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().content.map(c => String(c.id));",
+                  "pm.test('Both new claims are waiting', () => {",
+                  "  pm.expect(ids).to.include(String(pm.collectionVariables.get('claimId')));",
+                  "  pm.expect(ids).to.include(String(pm.collectionVariables.get('rejectionClaimId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{officerToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims/queue?page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims", "queue"],
+              "query": [
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Officer picks up the second claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Assigned to the officer', () => pm.expect(String(pm.response.json().assignedOfficerId)).to.eql(String(pm.collectionVariables.get('officerId'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{officerToken}}" }],
+            "url": "{{baseUrl}}/api/claims/{{rejectionClaimId}}/pickup"
+          }
+        },
+        {
+          "name": "Manager assigns the first claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Officer assigned', () => pm.expect(pm.response.json().assignedOfficerId).to.not.equal(null));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{managerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"officerId\": {{officerId}}\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/assign"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Review, information request and decisions",
+      "item": [
+        {
+          "name": "Begin review",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('UNDER_REVIEW', () => pm.expect(pm.response.json().status).to.eql('UNDER_REVIEW'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{officerToken}}" }],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/review"
+          }
+        },
+        {
+          "name": "Request more information",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('MORE_INFO_REQUIRED', () => pm.expect(pm.response.json().status).to.eql('MORE_INFO_REQUIRED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{officerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Please provide the repair estimate and incident report.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/request-info"
+          }
+        },
+        {
+          "name": "Officer cannot answer for the claimant (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [ "pm.test('Forbidden', () => pm.response.to.have.status(403));" ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{officerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"Officer trying to answer\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/provide-info"
+          }
+        },
+        {
+          "name": "Claimant provides the requested information",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const claim = pm.response.json();",
+                  "pm.test('Back to UNDER_REVIEW with the answer stored', () => {",
+                  "  pm.expect(claim.status).to.eql('UNDER_REVIEW');",
+                  "  pm.expect(claim.informationResponse).to.include('Repair estimate');",
+                  "  pm.expect(claim.informationRequest).to.include('repair estimate');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{claimantToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"Repair estimate of 900 HKD and the plumber's incident report are attached.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/provide-info"
+          }
+        },
+        {
+          "name": "Claimant cannot answer twice (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [ "pm.test('Conflict - nothing is being requested', () => pm.response.to.have.status(409));" ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{claimantToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"Second answer\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/provide-info"
+          }
+        },
+        {
+          "name": "Approve claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('APPROVED', () => pm.expect(pm.response.json().status).to.eql('APPROVED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{officerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Repair estimate reviewed and approved.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/approve"
+          }
+        },
+        {
+          "name": "Settle claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('SETTLED', () => pm.expect(pm.response.json().status).to.eql('SETTLED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{officerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Payment issued to claimant.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/settle"
+          }
+        },
+        {
+          "name": "Reject a settled claim (409 invalid transition)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Problem details body', () => pm.expect(pm.response.json().detail).to.include('Invalid claim status transition'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{officerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Too late\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/reject"
+          }
+        },
+        {
+          "name": "Begin review of second claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [ "pm.test('Status is 200', () => pm.response.to.have.status(200));" ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{officerToken}}" }],
+            "url": "{{baseUrl}}/api/claims/{{rejectionClaimId}}/review"
+          }
+        },
+        {
+          "name": "Reject second claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('REJECTED', () => pm.expect(pm.response.json().status).to.eql('REJECTED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{officerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"The incident is outside the policy coverage period.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/claims/{{rejectionClaimId}}/reject"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Audit history and filters",
+      "item": [
+        {
+          "name": "Claim history (claimant)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const history = pm.response.json();",
+                  "pm.test('Six recorded transitions in order', () => {",
+                  "  pm.expect(history.map(h => h.toStatus)).to.eql(['SUBMITTED', 'UNDER_REVIEW', 'MORE_INFO_REQUIRED', 'UNDER_REVIEW', 'APPROVED', 'SETTLED']);",
+                  "  pm.expect(history[0].fromStatus).to.equal(null);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{claimantToken}}" }],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/history"
+          }
+        },
+        {
+          "name": "Filter claims by status (SETTLED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Only settled claims', () => pm.response.json().content.forEach(c => pm.expect(c.status).to.eql('SETTLED')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{claimantToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims?status=SETTLED",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims"],
+              "query": [ { "key": "status", "value": "SETTLED" } ]
+            }
+          }
+        },
+        {
+          "name": "Filter with an unknown status (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [ "pm.test('Bad request', () => pm.response.to.have.status(400));" ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{claimantToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/claims?status=NOT_A_STATUS",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "claims"],
+              "query": [ { "key": "status", "value": "NOT_A_STATUS" } ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Manager dashboard",
+      "item": [
+        {
+          "name": "Workload dashboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Settled and rejected counted', () => {",
+                  "  pm.expect(pm.response.json().settled).to.be.at.least(1);",
+                  "  pm.expect(pm.response.json().rejected).to.be.at.least(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{managerToken}}" }],
+            "url": "{{baseUrl}}/api/dashboard/workload"
+          }
+        },
+        {
+          "name": "Liability dashboard (with claim type and market breakdown)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Breakdown present', () => {",
+                  "  pm.expect(body).to.have.property('pendingExposure');",
+                  "  pm.expect(body.byClaimType).to.be.an('array');",
+                  "  pm.expect(body.byMarket).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{managerToken}}" }],
+            "url": "{{baseUrl}}/api/dashboard/liability"
+          }
+        },
+        {
+          "name": "Officer performance dashboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Officer listed', () => pm.expect(pm.response.json().map(o => String(o.officerId))).to.include(String(pm.collectionVariables.get('officerId'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{managerToken}}" }],
+            "url": "{{baseUrl}}/api/dashboard/performance"
+          }
+        },
+        {
+          "name": "Officer cannot open the dashboard (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [ "pm.test('Forbidden', () => pm.response.to.have.status(403));" ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{officerToken}}" }],
+            "url": "{{baseUrl}}/api/dashboard/workload"
+          }
+        }
+      ]
+    }
+  ]
+}

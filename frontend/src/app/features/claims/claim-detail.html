@@ -1,0 +1,138 @@
+<p><a [routerLink]="backLink()">← Back</a></p>
+
+@if (loadError()) {
+  <p class="error" role="alert">{{ loadError() }}</p>
+}
+@if (!claim() && !loadError()) {
+  <p class="muted">Loading…</p>
+}
+
+@if (claim(); as c) {
+  <div class="page-head">
+    <div>
+      <h1>{{ c.claimNumber }}</h1>
+      <p class="muted">{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }} claim · market {{ c.market }} · policy {{ c.policyNumber }}</p>
+    </div>
+    <app-status-badge [status]="c.status" />
+  </div>
+
+  @if (message()) {
+    <p class="success" role="status">{{ message() }}</p>
+  }
+  @if (actionError()) {
+    <p class="error" role="alert">{{ actionError() }}</p>
+  }
+
+  <div class="grid cols-2">
+    <section class="card">
+      <h2>Claim</h2>
+      <dl class="facts">
+        <dt>Amount claimed</dt>
+        <dd data-testid="amount">{{ c.amountClaimed | amount }} <span class="muted">{{ c.market }}</span></dd>
+        <dt>Incident date</dt>
+        <dd>{{ c.incidentDate }}</dd>
+        <dt>Claimant</dt>
+        <dd>{{ c.claimantName }} · {{ c.claimantEmail }}</dd>
+        <dt>Officer</dt>
+        <dd>{{ c.assignedOfficerName ?? 'Not assigned yet' }}</dd>
+        <dt>Submitted</dt>
+        <dd>{{ c.createdAt | date: 'medium' }}</dd>
+        <dt>Last updated</dt>
+        <dd>{{ c.updatedAt | date: 'medium' }}</dd>
+      </dl>
+      <h2>What happened</h2>
+      <p class="description">{{ c.description }}</p>
+      @if (c.decisionNotes) {
+        <h2>Decision</h2>
+        <p class="description" data-testid="decision">{{ c.decisionNotes }}</p>
+      }
+    </section>
+
+    <section class="card actions" aria-label="Actions">
+      <h2>Actions</h2>
+
+      @if (actions().length === 0) {
+        <p class="muted" data-testid="no-actions">There is nothing for you to do on this claim right now.</p>
+      }
+
+      @if (can('PICKUP')) {
+        <button type="button" class="primary" [disabled]="busy()" (click)="perform('PICKUP')">{{ labels.PICKUP }}</button>
+      }
+
+      @if (can('REVIEW')) {
+        <button type="button" class="primary" [disabled]="busy()" (click)="perform('REVIEW')">{{ labels.REVIEW }}</button>
+      }
+
+      @if (can('ASSIGN')) {
+        <label for="assignee">{{ c.assignedOfficerName ? 'Reassign to' : 'Assign to' }}</label>
+        <select id="assignee" (change)="selectOfficer($event)">
+          <option value="">Choose an officer…</option>
+          @for (o of officers(); track o.officerId) {
+            <option [value]="o.officerId">{{ o.officerName }} ({{ o.activeClaims }} active)</option>
+          }
+        </select>
+        <button type="button" [disabled]="!canSubmit('ASSIGN')" (click)="perform('ASSIGN')">{{ labels.ASSIGN }}</button>
+      }
+
+      @if (can('PROVIDE_INFO')) {
+        <label for="response">Your answer to the officer's question</label>
+        <textarea id="response" [value]="response()" (input)="response.set(text($event))" maxlength="2000"></textarea>
+        <button type="button" class="primary" [disabled]="!canSubmit('PROVIDE_INFO')" (click)="perform('PROVIDE_INFO')">
+          {{ labels.PROVIDE_INFO }}
+        </button>
+      }
+
+      @if (noteActions().length > 0) {
+        <label for="note">Note <span class="muted">(required — it is recorded in the claim history)</span></label>
+        <textarea id="note" [value]="note()" (input)="note.set(text($event))" maxlength="2000"></textarea>
+        <div class="button-row">
+          @for (a of noteActions(); track a) {
+            <button
+              type="button"
+              [class.primary]="a === 'APPROVE' || a === 'SETTLE'"
+              [class.danger]="a === 'REJECT'"
+              [disabled]="!canSubmit(a)"
+              (click)="perform(a)"
+            >
+              {{ labels[a] }}
+            </button>
+          }
+        </div>
+      }
+    </section>
+  </div>
+
+  @if (c.informationRequest) {
+    <section class="card">
+      <h2>Information requested</h2>
+      <p class="description" data-testid="info-request">{{ c.informationRequest }}</p>
+      @if (c.informationResponse) {
+        <h2>Claimant's answer</h2>
+        <p class="description" data-testid="info-response">{{ c.informationResponse }}</p>
+      } @else {
+        <p class="pending">Waiting for the claimant to answer…</p>
+      }
+    </section>
+  }
+
+  <section class="card">
+    <h2>History</h2>
+    @if (history().length === 0) {
+      <p class="muted">No history yet.</p>
+    } @else {
+      <ol class="timeline" data-testid="history">
+        @for (h of history(); track h.id) {
+          <li>
+            <div>
+              <strong>{{ h.fromStatus ? statusLabels[h.fromStatus] + ' → ' : '' }}{{ statusLabels[h.toStatus] }}</strong>
+              <span class="muted"> · {{ h.changedByName }} · {{ h.changedAt | date: 'medium' }}</span>
+            </div>
+            @if (h.note) {
+              <div class="note">{{ h.note }}</div>
+            }
+          </li>
+        }
+      </ol>
+    }
+  </section>
+}

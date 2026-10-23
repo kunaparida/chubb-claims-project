@@ -1,0 +1,17 @@
+# Build output
+target/
+dist/
+.angular/
+node_modules/
+
+# IDE / OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Never commit a local Maven repository cache (it was committed by mistake in an earlier repo: 80 MB of jars)
+.build-cache/
+
+# Local logs
+*.log

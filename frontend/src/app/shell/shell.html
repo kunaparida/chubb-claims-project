@@ -1,0 +1,15 @@
+<header class="topbar">
+  <a class="brand" routerLink="/">Claims</a>
+  <nav aria-label="Main">
+    @for (item of nav(); track item.link) {
+      <a [routerLink]="item.link" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">{{ item.label }}</a>
+    }
+  </nav>
+  <div class="spacer"></div>
+  <div class="user">
+    <strong>{{ auth.user()?.fullName }}</strong>
+    <small>{{ roleLabel() }}</small>
+  </div>
+  <button type="button" class="link" (click)="auth.logout()">Sign out</button>
+</header>
+<main class="page"><router-outlet /></main>

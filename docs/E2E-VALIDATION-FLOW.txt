@@ -1,0 +1,516 @@
+==================================================================================================
+ CLAIMS PLATFORM - END-TO-END VALIDATION FLOW  (manual test script)
+==================================================================================================
+ Project   : Claims Platform - frontend/ (Angular 22)  +  backend/ (Spring Boot)
+ Purpose   : Follow this top to bottom to prove the whole system works - UI and backend together -
+             for all three roles (Claimant, Claims Officer, Manager).
+ How to use: Do each step under "DO", compare with "EXPECT", tick the [ ] box. If something does not
+             match, write down the step number and what you saw (see the results sheet at the end).
+
+ Every number in the EXPECT lines was produced by running this exact flow against the real backend
+ (fresh database) before this file was written. Claim numbers are random, so write down yours.
+
+ Roughly 25-30 minutes for the whole flow.
+
+
+==================================================================================================
+ PART 0 - BEFORE YOU START
+==================================================================================================
+
+ 0.1  What you need installed
+      [ ] JDK 21+ and Maven          (for the backend)
+      [ ] Node 22.22.3+, 24.15+ or 26+ and npm  (for the UI; Angular 22's range)   check: node --version
+
+ 0.2  Start the BACKEND  (folder: backend/ in this repository)
+          mvn spring-boot:run
+      Wait for the log line:   Started ClaimsManagementApplication
+      [ ] Open http://localhost:8080/swagger-ui/index.html  -> the Swagger page loads
+      IMPORTANT: the database is in memory. EVERY restart of the backend erases all accounts and
+      claims. Restart it before this flow so you start clean (expected: no claims at all).
+
+ 0.3  Start the UI  (folder: frontend/ in this repository)
+          npm install        (first time only)
+          npm start
+      [ ] Open http://localhost:4200  -> you land on the sign-in page (title: "Claims").
+      The UI talks to the backend through a proxy (proxy.conf.json: /api -> localhost:8080), so
+      always use http://localhost:4200 in the browser, never open the backend URL for the UI.
+
+ 0.4  Browser tip - switching between users
+      The signed-in session is saved in the browser (localStorage), which is SHARED between tabs.
+      Safest: use ONE tab and "Sign out" before signing in as someone else.
+      Nicer: use a normal window for the officer/manager and a private (incognito) window for
+      claimants, so you can watch both sides at once.
+
+ 0.5  Accounts used in this flow
+      +-----------+-------------------------------+--------------+----------------------------+
+      | Role      | Email                         | Password     | How you get it             |
+      +-----------+-------------------------------+--------------+----------------------------+
+      | Officer   | officer@claims.local          | ChangeMe123! | seeded by the backend      |
+      | Manager   | manager@claims.local          | ChangeMe123! | seeded by the backend      |
+      | Claimant  | alice.tan@example.com         | Passw0rd!A1  | you register it (Part 2)   |
+      | Claimant  | bob.lim@example.com           | Passw0rd!B1  | you register it (Part 2)   |
+      +-----------+-------------------------------+--------------+----------------------------+
+      The sign-in page has one-click buttons for the officer and manager under "Local demo accounts".
+
+ 0.6  The three claims you will create  (use incident date = yesterday, or any day up to today)
+      +----+----------+----------+--------+--------+-----------------+----------------------------+
+      |    | Claimant | Type     | Market | Amount | Policy number   | Description (>= 20 chars)  |
+      +----+----------+----------+--------+--------+-----------------+----------------------------+
+      | C1 | Alice    | Motor    | SG     | 2400.75| POL-SG-0001     | Rear bumper damaged when   |
+      |    |          |          |        |        |                 | another car reversed into  |
+      |    |          |          |        |        |                 | mine in a car park.        |
+      | C2 | Alice    | Property | HK     | 1000.00| POL-HK-0002     | Burst water pipe flooded   |
+      |    |          |          |        |        |                 | the living room and        |
+      |    |          |          |        |        |                 | damaged the wooden floor.  |
+      | C3 | Bob      | Motor    | MY     |  500.00| POL-MY-0003     | Windscreen cracked by a    |
+      |    |          |          |        |        |                 | stone thrown up from a     |
+      |    |          |          |        |        |                 | passing lorry.             |
+      +----+----------+----------+--------+--------+-----------------+----------------------------+
+      Create them in the order C1, C2, C3 (the queue is "oldest first", so order matters).
+      Write down the claim numbers you get:   C1 = ____________  C2 = ____________  C3 = ____________
+
+ 0.7  The story you are about to play
+      C1  Alice's motor claim : picked up -> review -> officer asks a question -> Alice answers ->
+                                approved -> settled                                (happy path)
+      C2  Alice's property claim: manager assigns it to the officer -> review -> rejected  (reject path)
+      C3  Bob's claim         : nobody touches it - it stays waiting in the queue
+                                (so the dashboard always has an "unassigned" claim to show)
+
+
+==================================================================================================
+ PART 1 - SMOKE CHECKS (signed out)
+==================================================================================================
+
+ 1.1  DO: Open http://localhost:4200/claims  (you are not signed in).
+      EXPECT:
+      [ ] You are sent to the sign-in page (address ends in /login). No claim data is shown.
+
+ 1.2  DO: Look at the sign-in page.
+      EXPECT:
+      [ ] "Sign in" button is greyed out (disabled) while the fields are empty.
+      [ ] A "Create an account" link, and a collapsed "Local demo accounts" section.
+
+ 1.3  DO: Type  alice.tan@example.com  and any password, e.g. nope. (Alice does not exist yet.)  Click Sign in.
+      EXPECT:
+      [ ] Red message:  Invalid email or password
+      [ ] You stay on the sign-in page. (The same message appears for a wrong password - the backend
+          deliberately does not reveal which of the two was wrong.)
+
+
+==================================================================================================
+ PART 2 - CREATE THE CLAIMANT ACCOUNTS
+==================================================================================================
+
+ 2.1  DO: Click "Create an account".  Type Full name "Alice Tan", Email alice.tan@example.com,
+          Password "short".
+      EXPECT:
+      [ ] "Create account" stays disabled (the backend minimum is 8 characters).
+
+ 2.2  DO: Change the password to  Passw0rd!A1  and click "Create account".
+      EXPECT:
+      [ ] You are signed in and land on "My claims" (address ends in /claims).
+      [ ] Top bar shows  "Alice Tan"  with the label "Claimant".
+      [ ] Navigation shows exactly two links: "My claims" and "Report an incident".
+      [ ] Page says "0 claim(s)" and "No claims to show."
+
+ 2.3  DO: Click "Sign out".  Then register Bob:  "Bob Lim", bob.lim@example.com, Passw0rd!B1.
+      EXPECT:
+      [ ] Same result as 2.2, but the top bar shows "Bob Lim".
+
+ 2.4  DO: Sign out.  Click "Create an account" and try to register Alice's email again
+          (alice.tan@example.com, any valid password).
+      EXPECT:
+      [ ] Red message:  An account with this email already exists
+      [ ] You are NOT signed in.
+
+
+==================================================================================================
+ PART 3 - CLAIMANTS REPORT INCIDENTS
+==================================================================================================
+
+ 3.1  DO: Sign in as Alice (alice.tan@example.com / Passw0rd!A1).  Click "Report an incident".
+      EXPECT:
+      [ ] "Your name" is already filled with "Alice Tan".
+      [ ] "Your email" shows alice.tan@example.com and is greyed out / cannot be edited
+          (the backend only accepts the signed-in user's own email).
+      [ ] "Submit claim" is disabled.
+
+ 3.2  FORM VALIDATION - try each of these, then clear/fix it:
+      [ ] Market = "S" (one letter), click elsewhere   -> "Enter a 2-letter market code."
+      [ ] Description = "too short", click elsewhere   -> "Please describe what happened in at least 20 characters."
+      [ ] Amount = 0                                   -> "Enter an amount greater than zero with at most two decimals."
+      [ ] Amount = 10.123                              -> same message (max two decimals)
+      [ ] Date = tomorrow (type it, or pick a future day) -> "The incident date cannot be in the future."
+      [ ] Policy number left empty                     -> "Submit claim" stays disabled
+      In every case "Submit claim" stays disabled until everything is valid.
+
+ 3.3  DO: Create C1 as Alice (data in 0.6): type Motor, market sg (lower case is fine), policy
+          POL-SG-0001, date yesterday, the description, amount 2400.75.  Click "Submit claim".
+      EXPECT:
+      [ ] You are taken to the claim page (address /claims/1).
+      [ ] Heading = the claim number (note it down as C1).  Sub-line: "Motor claim . market SG . policy POL-SG-0001".
+      [ ] Status badge: "Submitted".
+      [ ] "Amount claimed  2,400.75 SG"   ("SG" is the market - the backend has no currency).
+      [ ] "Officer: Not assigned yet".
+      [ ] Actions box says: "There is nothing for you to do on this claim right now."
+      [ ] History has ONE entry:  "Submitted . Alice Tan . <date/time>"  with the note "Claim submitted".
+
+ 3.4  DO: Create C2 as Alice (Property, HK, POL-HK-0002, 1000.00, description from 0.6).
+      Then click "My claims".
+      EXPECT:
+      [ ] "2 claim(s)". Newest first: C2 on top, C1 below. Both show status "Submitted".
+      [ ] Amounts shown as "1,000.00 HK" and "2,400.75 SG".
+
+ 3.5  DO: Sign out.  Sign in as Bob.  Create C3 (Motor, MY, POL-MY-0003, 500.00, description from 0.6).
+      EXPECT:
+      [ ] Claim page opens (address /claims/3). Status "Submitted".
+      [ ] Bob's "My claims" shows only C3  ("1 claim(s)") - not Alice's claims.
+
+
+==================================================================================================
+ PART 4 - MANAGER DASHBOARD, BEFORE ANY WORK HAS STARTED  (checkpoint A)
+==================================================================================================
+
+ 4.1  DO: Sign out. Sign in as the manager (use the "Manager" demo button).
+      EXPECT:
+      [ ] You land on "Dashboard" (address /dashboard).
+      [ ] Top bar: "Claims Manager", label "Manager". Navigation: Dashboard, Work queue, All claims.
+
+ 4.2  CHECKPOINT A - the numbers on the dashboard:
+      Tiles:
+      [ ] Unassigned = 3        [ ] Open claims = 3       [ ] Submitted = 3
+      [ ] Under review = 0      [ ] Awaiting information = 0   [ ] Approved, unpaid = 0
+      [ ] Rejected = 0          [ ] Settled = 0
+      "Outstanding liability" table, by market (listed alphabetically):
+      [ ] HK  | Pending exposure 1,000.00 | Approved, awaiting settlement 0.00
+      [ ] MY  | Pending exposure   500.00 | Approved, awaiting settlement 0.00
+      [ ] SG  | Pending exposure 2,400.75 | Approved, awaiting settlement 0.00
+      [ ] Total row (tagged "unconverted, mixed markets") = 3,900.75  |  0.00
+          (the backend adds all markets together with no currency conversion, so the UI labels the
+           total instead of presenting it as one currency)
+      "By line of business":
+      [ ] Motor 2,900.75 pending      [ ] Property 1,000.00 pending
+      "Officer performance":
+      [ ] One officer, "Claims Officer":  Assigned 0 | Active 0 | Resolved 0
+
+ 4.3  DO: Click "All claims".
+      EXPECT:
+      [ ] Heading "All claims", "3 claim(s)", newest first: C3, C2, C1.
+      [ ] Claimant names shown (Bob Lim, Alice Tan, Alice Tan). Officer column shows a dash for all.
+      DO: Set the Status filter to "Rejected".   EXPECT: [ ] "No claims to show."   Set it back to "Any status".
+
+
+==================================================================================================
+ PART 5 - OFFICER PICKS UP AND STARTS THE REVIEW OF C1
+==================================================================================================
+
+ 5.1  DO: Sign out. Sign in as the officer (use the "Officer" demo button).
+      EXPECT:
+      [ ] You land on "Work queue" (address /queue). Navigation: "Work queue", "Assigned to me".
+      [ ] Sub-title: "Submitted claims nobody has picked up yet - the longest-waiting is first."
+      [ ] Three rows, in this order: C1, C2, C3 (oldest first). Columns: Claim, Type, Claimant,
+          Amount claimed, Waiting since. Each row has a blue "Pick up" button.
+      [ ] Page footer: "Page 1 of 1 . 3 waiting".
+
+ 5.2  DO: Click "Pick up" on the C1 row.
+      EXPECT:
+      [ ] Green message: "You picked up <C1 number>. Open it to start the review".
+      [ ] The queue now lists only C2 and C3.
+
+ 5.3  DO: Click "Assigned to me".
+      EXPECT:
+      [ ] "1 claim(s)": C1, status still "Submitted" (picking up only assigns - it does not start the review).
+
+ 5.4  DO: Open C1.
+      EXPECT:
+      [ ] "Officer: Claims Officer".
+      [ ] The Actions box has ONE button: "Start review".
+
+ 5.5  DO: Click "Start review".
+      EXPECT:
+      [ ] Green message "Review started."   Status badge: "Under review".
+      [ ] Actions box now shows a "Note" text box and three buttons: "Request information",
+          "Approve", "Reject" - all three DISABLED while the note is empty (a note is mandatory).
+      [ ] History: a second entry "Submitted -> Under review . Claims Officer".
+
+ 5.6  CHECKPOINT B (optional - sign in as the manager in another window, Refresh the dashboard):
+      [ ] Submitted 2 | Under review 1 | Unassigned 2 | Open claims 3
+      [ ] Officer performance: Assigned 1 | Active 1 | Resolved 0
+
+
+==================================================================================================
+ PART 6 - OFFICER ASKS FOR MORE INFORMATION, CLAIMANT ANSWERS
+==================================================================================================
+
+ 6.1  DO (officer, on C1): in "Note" type  "Please upload a repair estimate from a garage."
+          Click "Request information".
+      EXPECT:
+      [ ] Green message "Your question was sent to the claimant."
+      [ ] Status badge: "More information required".
+      [ ] A new box "Information requested" with your question and the line
+          "Waiting for the claimant to answer...".
+      [ ] Actions box shows only "Start review" (the officer could resume if needed).
+      [ ] History entry: "Under review -> More information required . Claims Officer" with the question as its note.
+
+ 6.2  CHECKPOINT C (manager dashboard): [ ] Awaiting information 1 | Under review 0 | Submitted 2
+
+ 6.3  DO: Sign out. Sign in as Alice. Open "My claims".
+      EXPECT:
+      [ ] C1 shows the badge "More information required" and an orange "Action needed" badge.
+      [ ] C2 shows plain "Submitted" (no "Action needed").
+
+ 6.4  DO: Open C1.
+      EXPECT:
+      [ ] "Information requested" box shows the officer's question.
+      [ ] Actions box: a text area "Your answer to the officer's question" and a "Send information"
+          button that is DISABLED until you type something.
+
+ 6.5  DO: Type  "Estimate from AutoFix Garage: 2,300.00 for bumper and boot repair."  Click "Send information".
+      EXPECT:
+      [ ] Green message "Thank you - your information was sent."
+      [ ] Status "Under review". Actions box: "There is nothing for you to do on this claim right now."
+      [ ] "Claimant's answer" appears under the question.
+      [ ] History entry "More information required -> Under review . Alice Tan" with your answer as the note.
+
+ 6.6  PRIVACY CHECK. Sign out, sign in as Bob and open this address by hand:
+          http://localhost:4200/claims/1        (Alice's claim C1)
+      EXPECT:
+      [ ] Red message "Claim not found" - not Alice's data. (The backend answers 404, not 403, so it
+          does not even confirm the claim exists.)
+
+
+==================================================================================================
+ PART 7 - OFFICER APPROVES AND SETTLES C1
+==================================================================================================
+
+ 7.1  DO: Sign in as the officer. "Assigned to me" -> open C1.
+      EXPECT:
+      [ ] Status "Under review" and your Note box with "Request information / Approve / Reject".
+      [ ] The "Claimant's answer" is visible to you.
+
+ 7.2  DO: Click "Approve" with the note EMPTY.
+      EXPECT:
+      [ ] Nothing happens - the button is disabled. (Type spaces only: still disabled.)
+
+ 7.3  DO: Note = "Estimate verified, approved in full."  Click "Approve".
+      EXPECT:
+      [ ] Green message "Claim approved."   Status badge "Approved".
+      [ ] A "Decision" box shows "Estimate verified, approved in full."
+      [ ] Actions box now has a Note box and ONE button: "Mark as settled" (disabled until a note is typed).
+
+ 7.4  CHECKPOINT D (manager dashboard):
+      [ ] Approved, unpaid = 1  |  Open claims = 3
+      [ ] SG row:  Pending exposure 0.00  |  Approved, awaiting settlement 2,400.75
+      [ ] Total row:  1,500.00 pending (= C2 1,000 + C3 500)  |  2,400.75 approved awaiting settlement
+
+ 7.5  DO (officer): Note = "Paid by bank transfer."  Click "Mark as settled".
+      EXPECT:
+      [ ] Green message "Claim marked as settled."   Status badge "Settled".
+      [ ] The "Decision" box now reads "Paid by bank transfer."  (the backend keeps ONE decision note on
+          the claim, so settling replaces the approval note - the approval note is still in the History,
+          see 7.7 entry 5).
+      [ ] Actions box: "There is nothing for you to do on this claim right now."  (settled is final)
+
+ 7.6  CHECKPOINT E (manager dashboard):
+      [ ] Settled 1 | Approved, unpaid 0 | Open claims 2 | Unassigned 2
+      [ ] Total row:  1,500.00 pending  |  0.00 approved awaiting settlement
+
+ 7.7  HISTORY OF C1 - open C1 (any role that may see it) and check the History box has exactly
+      SIX entries, oldest first:
+      [ ] 1. Submitted                          . Alice Tan
+      [ ] 2. Submitted -> Under review          . Claims Officer
+      [ ] 3. Under review -> More information required . Claims Officer   (note = the question)
+      [ ] 4. More information required -> Under review . Alice Tan        (note = her answer)
+      [ ] 5. Under review -> Approved           . Claims Officer          (note = "Estimate verified...")
+      [ ] 6. Approved -> Settled                . Claims Officer          (note = "Paid by bank transfer.")
+      (Picking up / assigning is not a status change, so it is not in the history.)
+
+ 7.8  DO: Sign in as Alice, open C1.
+      EXPECT:
+      [ ] Status "Settled", the "Decision" box reads "Paid by bank transfer.", no actions.
+      [ ] The History shows the same six entries, including the approval note.
+
+
+==================================================================================================
+ PART 8 - MANAGER ASSIGNS C2, OFFICER REJECTS IT
+==================================================================================================
+
+ 8.1  DO: Sign in as the manager. "All claims" -> open C2.
+      EXPECT:
+      [ ] Status "Submitted", "Officer: Not assigned yet".
+      [ ] Actions box shows "Start review", then an "Assign to" drop-down ("Choose an officer...") and a
+          button "Assign to an officer" (DISABLED until you choose someone).
+      [ ] The drop-down lists "Claims Officer (0 active)".   (There is only one seeded officer.)
+
+ 8.2  DO: Choose "Claims Officer" and click "Assign to an officer".
+      EXPECT:
+      [ ] Green message "Claim assigned."   "Officer: Claims Officer".   Status still "Submitted".
+      [ ] The drop-down label changes from "Assign to" to "Reassign to".
+
+ 8.3  CHECKPOINT F (dashboard): [ ] Unassigned = 1  (only C3 is left)
+
+ 8.4  DO: Sign in as the officer. The Work queue now shows only C3.  "Assigned to me" shows C1 and C2.
+      Open C2 -> "Start review".
+      EXPECT:  [ ] Status "Under review".
+
+ 8.5  DO: Note = "Policy does not cover water damage from burst pipes."  Click "Reject".
+      EXPECT:
+      [ ] Green message "Claim rejected."   Status badge "Rejected" (red).
+      [ ] "Decision" box shows the reason.   No actions left.
+      [ ] History of C2 has 3 entries: Submitted (Alice) / Submitted -> Under review (officer) /
+          Under review -> Rejected (officer, with the reason).
+
+ 8.6  DO: Sign in as Alice. Open C2.
+      EXPECT:  [ ] She sees "Rejected" and the reason "Policy does not cover water damage from burst pipes."
+
+
+==================================================================================================
+ PART 9 - FINAL STATE  (checkpoint FINAL)  - sign in as the manager
+==================================================================================================
+
+ 9.1  Dashboard tiles:
+      [ ] Unassigned 1        [ ] Open claims 1       [ ] Submitted 1
+      [ ] Under review 0      [ ] Awaiting information 0   [ ] Approved, unpaid 0
+      [ ] Rejected 1          [ ] Settled 1
+
+ 9.2  Outstanding liability (only claims that are still open count - settled and rejected claims drop out):
+      [ ] By market: ONE row, MY  | 500.00 | 0.00
+      [ ] Total row: 500.00 | 0.00
+      [ ] By line of business: Motor 500.00 only
+      Officer performance:
+      [ ] Claims Officer:  Assigned 2 | Active 0 | Resolved 2
+
+ 9.3  "All claims" (3 claims, newest first): C3, C2, C1.
+      [ ] Status filter "Rejected"  -> only C2
+      [ ] Status filter "Settled"   -> only C1
+      [ ] Status filter "Submitted" -> only C3
+      [ ] Paging: "Page 1 of 1".
+
+ 9.4  Officer's "Assigned to me": [ ] C2 and C1 (2 claims).  Work queue: [ ] only C3.
+ 9.5  Alice's "My claims":        [ ] C2 and C1 (2 claims).   Bob's "My claims": [ ] only C3.
+
+
+==================================================================================================
+ PART 10 - WHO MAY SEE WHAT  (type these addresses by hand into the browser)
+==================================================================================================
+ Each of these must END UP on the page shown - the app silently redirects people to their own home.
+
+ [ ] Signed out,  /queue or /dashboard or /claims/new      -> sign-in page (/login)
+ [ ] Claimant,    /queue                                    -> /claims
+ [ ] Claimant,    /dashboard                                -> /claims
+ [ ] Officer,     /dashboard                                -> /queue
+ [ ] Officer,     /claims/new                               -> /queue
+ [ ] Manager,     /claims/new                               -> /dashboard
+ [ ] Claimant Alice, /claims/3 (Bob's claim)                -> red "Claim not found"
+ [ ] Anyone,      /something-that-does-not-exist            -> their own home page
+ [ ] Navigation links differ per role:
+       Claimant : My claims | Report an incident
+       Officer  : Work queue | Assigned to me
+       Manager  : Dashboard | Work queue | All claims
+ [ ] A manager sees NO "Pick up" button in the queue (only officers can pick up); a manager assigns
+     from the claim page instead (Part 8).
+
+ Note: these redirects are only convenience in the UI. The real protection is in the backend - the
+ same restrictions were also verified by calling the API directly (e.g. a claimant calling the queue
+ gets HTTP 403; another person's claim gets HTTP 404).
+
+
+==================================================================================================
+ PART 11 - RESILIENCE
+==================================================================================================
+
+ 11.1 Refresh keeps you signed in.
+      DO: Signed in as anyone, press F5.     EXPECT: [ ] still signed in on the same page.
+
+ 11.2 Sign out is final.
+      DO: Click "Sign out", then press the browser Back button.
+      EXPECT: [ ] you end on the sign-in page, not on claim data.
+
+ 11.3 Backend unreachable.
+      DO: Stop the backend (Ctrl+C in its terminal). In the UI, as the manager, open Dashboard and click "Refresh".
+      EXPECT: [ ] Red message "Cannot reach the server. Check that the backend is running and try again."
+              [ ] The page does not crash or go blank, and the Refresh button still works.
+      (Technical note: in development the UI's proxy answers "502 Bad Gateway" with an empty body when the
+       backend is down; the UI recognises that and shows this message. Checked by calling the proxy while
+       the backend was stopped.)
+
+ 11.4 Backend restarted = data gone (the database is in memory).
+      DO: Start the backend again. Reload the UI while still signed in as Alice (or Bob).
+      EXPECT: [ ] You are sent back to the sign-in page (the account no longer exists, the backend answers
+                  401, and the UI signs you out). The seeded officer/manager can sign in again; their
+                  claim list is empty.
+      This is expected behaviour, not a bug. Re-register Alice/Bob to run the flow again.
+
+
+==================================================================================================
+ PART 12 - OPTIONAL: CROSS-CHECK AGAINST THE BACKEND DIRECTLY
+==================================================================================================
+ To prove the UI shows what the backend really holds:
+ 12.1 Open http://localhost:8080/swagger-ui/index.html, call POST /api/auth/login as the manager,
+      copy the "token", click "Authorize" and paste it.
+ 12.2 Call GET /api/dashboard/workload  -> must equal the dashboard tiles you saw in Part 9.
+ 12.3 Call GET /api/dashboard/liability -> must equal the liability table in Part 9.
+ 12.4 Call GET /api/claims/{id}/history for claim 1 -> the same six status changes as step 7.7.
+ (There is also a Postman collection: backend/postman/Claims-Management.postman_collection.json)
+
+
+==================================================================================================
+ THINGS THAT LOOK ODD BUT ARE NOT BUGS
+==================================================================================================
+ - Picking up a claim does not change its status. It stays "Submitted" until the officer clicks
+   "Start review". (Backend rule.)
+ - "Unassigned" on the dashboard counts every claim with no officer, whatever its status.
+   "Open claims" = Submitted + Under review + Awaiting information + Approved.
+ - Liability has no currency symbol. The backend stores only a 2-letter market code, so amounts are
+   shown with their market ("2,400.75 SG"), and the grand total is labelled "unconverted, mixed markets".
+ - A claimant can see the name of the officer on their claim - the backend sends it.
+ - Only ONE officer is seeded, so two officers racing to pick up the same claim cannot be tried by hand.
+   (That case - "already assigned to another officer" - is covered by the automated tests instead.)
+ - The Status filter is the only filter on the claims lists - the backend offers no search.
+ - Claim numbers look like CLM-8D45968B-EDE and are random every run.
+
+
+==================================================================================================
+ IF SOMETHING FAILS - QUICK DIAGNOSIS
+==================================================================================================
+ Symptom                                           Likely cause / what to do
+ ------------------------------------------------  -----------------------------------------------
+ Sign-in says "Cannot reach the server"            Backend not running or still starting. Check
+                                                   http://localhost:8080/v3/api-docs returns JSON.
+ Browser console shows a CORS error                You opened the UI on a different address/port.
+                                                   Use http://localhost:4200 started with "npm start"
+                                                   (the proxy is what makes CORS unnecessary).
+ "An account with this email already exists"       The backend has not been restarted since your last
+                                                   run. Restart it for a clean database.
+ Numbers on the dashboard are higher than expected Leftover data from a previous run. Restart backend.
+ Page title/tab shows "Claims" but page is blank   Check the browser console and the "npm start" terminal
+                                                   for build errors.
+ Signed out unexpectedly                           Backend restarted (see 11.4) or the token expired
+                                                   (valid for 24 hours).
+
+
+==================================================================================================
+ RESULTS SHEET  (fill in as you go)
+==================================================================================================
+ Tester: ____________________   Date: ______________   Backend commit/version: ____________________
+
+ Part  Description                                        PASS / FAIL    Notes (step number + what you saw)
+ ----  -------------------------------------------------  -------------  -----------------------------------
+ 1     Smoke checks (signed out)
+ 2     Create claimant accounts
+ 3     Claimants report incidents (+ form validation)
+ 4     Manager dashboard - checkpoint A
+ 5     Officer picks up and starts review (+ checkpoint B)
+ 6     Information request and answer (+ checkpoint C, privacy)
+ 7     Approve and settle (+ checkpoints D, E, history)
+ 8     Manager assigns, officer rejects (+ checkpoint F)
+ 9     Final state and lists
+ 10    Who may see what
+ 11    Resilience
+ 12    Cross-check with Swagger (optional)
+
+ Overall result:  [ ] ALL PASS    [ ] FAILURES - list them above
+
+==================================================================================================
+ END OF DOCUMENT
+==================================================================================================

@@ -1,0 +1,75 @@
+<p><a routerLink="/claims">← My claims</a></p>
+<h1>Report an incident</h1>
+<p class="muted">Tell us what happened. A claims officer will pick it up and may ask you for more information.</p>
+
+<form class="card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  <div class="row">
+    <div>
+      <label for="claimantName">Your name</label>
+      <input id="claimantName" formControlName="claimantName" />
+      @if (problem('claimantName')) { <p class="field-error">{{ problem('claimantName') }}</p> }
+    </div>
+    <div>
+      <label for="claimantEmail">Your email</label>
+      <input id="claimantEmail" [value]="email" readonly />
+      @if (problem('claimantEmail')) { <p class="field-error">{{ problem('claimantEmail') }}</p> }
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="claimType">Type of claim</label>
+      <select id="claimType" formControlName="claimType">
+        <option value="MOTOR">Motor</option>
+        <option value="PROPERTY">Property</option>
+      </select>
+    </div>
+    <div>
+      <label for="market">Market <span class="muted">(2-letter code, e.g. SG)</span></label>
+      <input id="market" formControlName="market" maxlength="2" autocomplete="off" />
+      @if (form.controls.market.touched && form.controls.market.invalid) {
+        <p class="field-error">Enter a 2-letter market code.</p>
+      }
+      @if (problem('market')) { <p class="field-error">{{ problem('market') }}</p> }
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="policyNumber">Policy number</label>
+      <input id="policyNumber" formControlName="policyNumber" />
+      @if (problem('policyNumber')) { <p class="field-error">{{ problem('policyNumber') }}</p> }
+    </div>
+    <div>
+      <label for="incidentDate">Date of incident</label>
+      <input id="incidentDate" type="date" formControlName="incidentDate" [max]="today" />
+      @if (form.controls.incidentDate.errors?.['future']) {
+        <p class="field-error">The incident date cannot be in the future.</p>
+      }
+      @if (problem('incidentDate')) { <p class="field-error">{{ problem('incidentDate') }}</p> }
+    </div>
+  </div>
+
+  <label for="description">What happened? <span class="muted">(at least 20 characters)</span></label>
+  <textarea id="description" formControlName="description" maxlength="4000"></textarea>
+  @if (form.controls.description.touched && form.controls.description.errors?.['minlength']) {
+    <p class="field-error">Please describe what happened in at least 20 characters.</p>
+  }
+  @if (problem('description')) { <p class="field-error">{{ problem('description') }}</p> }
+
+  <label for="amountClaimed">Amount you are claiming</label>
+  <input id="amountClaimed" type="number" min="0.01" step="0.01" formControlName="amountClaimed" />
+  @if (form.controls.amountClaimed.touched && form.controls.amountClaimed.errors?.['amount']) {
+    <p class="field-error">Enter an amount greater than zero with at most two decimals.</p>
+  }
+  @if (problem('amountClaimed')) { <p class="field-error">{{ problem('amountClaimed') }}</p> }
+
+  @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+  }
+  <p>
+    <button type="submit" class="primary" [disabled]="busy() || form.invalid">
+      {{ busy() ? 'Submitting…' : 'Submit claim' }}
+    </button>
+  </p>
+</form>

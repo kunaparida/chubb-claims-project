@@ -1,0 +1,78 @@
+<div class="page-head">
+  <div>
+    <h1>{{ heading() }}</h1>
+    @if (result(); as r) {
+      <p class="muted">{{ r.totalElements }} claim(s)</p>
+    }
+  </div>
+  @if (isClaimant()) {
+    <a routerLink="/claims/new"><button type="button" class="primary">Report an incident</button></a>
+  }
+</div>
+
+<div class="card filters">
+  <label for="status">Status</label>
+  <select id="status" [value]="status()" (change)="setStatus(selectValue($event))">
+    <option value="">Any status</option>
+    @for (s of statuses; track s) {
+      <option [value]="s">{{ labels[s] }}</option>
+    }
+  </select>
+</div>
+
+@if (error()) {
+  <p class="error" role="alert">{{ error() }} <button type="button" class="link" (click)="load()">Retry</button></p>
+}
+@if (loading() && !result()) {
+  <p class="muted">Loading…</p>
+}
+
+@if (result(); as r) {
+  @if (r.content.length === 0) {
+    <div class="card empty">
+      <p>No claims to show.</p>
+      @if (isClaimant()) {
+        <a routerLink="/claims/new">Report an incident</a>
+      }
+    </div>
+  } @else {
+    <div class="card table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Claim</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Claimant</th>
+            <th class="num">Amount claimed</th>
+            <th>Officer</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (c of r.content; track c.id) {
+            <tr>
+              <td><a [routerLink]="['/claims', c.id]">{{ c.claimNumber }}</a></td>
+              <td>{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }}</td>
+              <td>
+                <app-status-badge [status]="c.status" />
+                @if (isClaimant() && c.status === 'MORE_INFO_REQUIRED') {
+                  <span class="badge pill-action">Action needed</span>
+                }
+              </td>
+              <td>{{ c.claimantName }}</td>
+              <td class="num">{{ c.amountClaimed | amount }} <span class="muted">{{ c.market }}</span></td>
+              <td>{{ c.assignedOfficerName ?? '—' }}</td>
+              <td class="nowrap">{{ c.createdAt | date: 'mediumDate' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button type="button" (click)="go(-1)" [disabled]="r.first || loading()">Previous</button>
+      <span class="muted">Page {{ r.page + 1 }} of {{ r.totalPages || 1 }}</span>
+      <button type="button" (click)="go(1)" [disabled]="r.last || loading()">Next</button>
+    </div>
+  }
+}
