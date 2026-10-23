@@ -1,5 +1,9 @@
 # Claims Platform
 
+**Full-stack claims management application** for claim submission, assessment, decision tracking, and management reporting.
+
+This repository contains a Spring Boot REST API and an Angular single-page application. The backend is authoritative for business rules and access control; the frontend provides role-specific workflows for claimants, claims officers, and managers.
+
 APAC motor and property claims: claimants report and track incidents, claims officers work them to a decision and settlement,
 and managers see workload, liability and officer performance. **One repository, two applications:**
 
@@ -54,11 +58,11 @@ npm start
 
 | Account | Email | Password |
 |---|---|---|
-| Claims officer (seeded) | `officer@claims.local` | `ChangeMe123!` |
-| Manager (seeded) | `manager@claims.local` | `ChangeMe123!` |
+| Claims officer (local demo only) | `officer@claims.local` | `ChangeMe123!` |
+| Manager (local demo only) | `manager@claims.local` | `ChangeMe123!` |
 | Claimant | register yourself with **Create an account** | your choice (8–72 characters) |
 
-The login page has a "Local demo accounts" panel whose buttons fill in the officer or manager email. Override the seeded password with the `BOOTSTRAP_PASSWORD`
+These seeded credentials are for local assessment/demo use only; change or disable them before any shared environment. The login page has a "Local demo accounts" panel whose buttons fill in the officer or manager email. Override the seeded password with the `BOOTSTRAP_PASSWORD`
 environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=false`.
 
 | URL | What |
@@ -73,18 +77,16 @@ environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=fa
 
 ## Run it with Docker (backend + frontend + Kafka)
 
-With Docker Desktop installed and ports 4200, 8080 and 9094 free, one command builds and starts everything, including a Kafka broker
-that receives the claim events:
+> **Validation status:** Docker and Kafka configuration is documented, but the available development record does not contain a successful `docker compose up` run. Treat the container workflow as pending validation until it has been built and tested in your environment.
+
+With Docker Desktop installed and ports 4200, 8080 and 9094 free, the following command is intended to build and start the application stack, including Kafka for claim events:
 
 ```bash
 docker compose up --build -d
 ```
 
 Then open <http://localhost:4200>. **[DOCKER.md](DOCKER.md)** has the full steps: installing WSL 2 and Docker Desktop, checking the install,
-watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. The stack is the backend
-(same in-memory H2 database, H2 console included, restarted automatically unless you stop it), the frontend behind nginx, and a
-single-node Kafka. The Docker files were written without Docker available to the AI, and no run result is recorded yet: see the status
-note at the top of DOCKER.md.
+watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. The stack is intended to run the backend (in-memory H2 database), the frontend behind nginx, and a single-node Kafka broker. The H2 console is enabled in the documented configuration and must not be exposed in a shared or production environment. See `DOCKER.md` for setup and verification steps.
 
 ## Try it end to end
 
@@ -175,9 +177,6 @@ the interceptor and guards, an exhaustive check of the UI's "who can do what" ta
 | [docs/E2E-VALIDATION-FLOW.txt](docs/E2E-VALIDATION-FLOW.txt) | Manual end-to-end test script |
 | [docs/SWAGGER-TEST-GUIDE.txt](docs/SWAGGER-TEST-GUIDE.txt) | Testing the API through Swagger |
 
-## Known limitations
+## Known limitations and deployment considerations
 
-Listed honestly in [ARCHITECTURE.md](ARCHITECTURE.md), part E. The ones a reviewer will meet first: in-memory H2 database (data resets on
-restart) with an unauthenticated H2 console, no CORS on the backend (hence the proxy), no currency on claims (amounts are shown with
-their market and the dashboard total is labelled "unconverted"), no optimistic locking on the backend, and a Docker stack whose run result
-is not yet recorded.
+The current implementation is a development/assessment baseline, not a production deployment configuration. Review [ARCHITECTURE.md](ARCHITECTURE.md), Part E, before deploying. Key considerations are: in-memory H2 data is lost on restart; the H2 console is enabled and unauthenticated in the documented configuration; the backend has no CORS configuration and relies on a proxy or same-origin gateway; claim amounts have no currency; optimistic locking is not implemented; and Docker/Kafka execution has not been confirmed in the recorded verification evidence.
