@@ -21,6 +21,7 @@ backend/        Spring Boot service      src/, pom.xml, postman/, CLAUDE.md
 frontend/       Angular app              src/, angular.json, proxy.conf.json, CLAUDE.md
 docs/           SWAGGER-TEST-GUIDE.txt   (API walkthrough in Swagger)
                 E2E-VALIDATION-FLOW.txt  (25-30 minute manual test script for the whole system)
+docker-compose.yml, DOCKER.md            run everything (with Kafka) in containers; the guide to do it
 ARCHITECTURE.md                          one architecture document: backend, frontend, how they fit
 AI_JOURNAL.md                            one AI working journal: what was asked, accepted, challenged, overridden
 CLAUDE.md                                guidance for AI assistants working in this repository
@@ -69,6 +70,19 @@ environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=fa
 > **Why the frontend talks to the backend through a proxy.** The backend has no CORS configuration, so a browser on port 4200
 > cannot call port 8080 directly (the browser blocks the cross-origin call). `npm start` proxies `/api` to the backend
 > (`frontend/proxy.conf.json`), so always use `http://localhost:4200`. See [ARCHITECTURE.md](ARCHITECTURE.md), part D.
+
+## Run it with Docker (backend + frontend + Kafka)
+
+With Docker Desktop installed and ports 4200, 8080 and 9094 free, one command builds and starts everything, including a Kafka broker
+that receives the claim events:
+
+```bash
+docker compose up --build -d
+```
+
+Then open <http://localhost:4200>. **[DOCKER.md](DOCKER.md)** has the full steps: installing WSL 2 and Docker Desktop, checking the install,
+watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. These Docker files have
+not been run yet (see the status note at the top of DOCKER.md).
 
 ## Try it end to end
 
@@ -154,6 +168,7 @@ the interceptor and guards, an exhaustive check of the UI's "who can do what" ta
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System overview; backend design and security; frontend structure; integration decisions (contract, proxy, auth, money); limitations and next steps |
 | [AI_JOURNAL.md](AI_JOURNAL.md) | How AI was used: every prompt, what was accepted, challenged or overridden, and what was and was not verified |
 | [backend/CLAUDE.md](backend/CLAUDE.md), [frontend/CLAUDE.md](frontend/CLAUDE.md), [CLAUDE.md](CLAUDE.md) | Working rules for AI assistants, per area |
+| [DOCKER.md](DOCKER.md) | Install Docker, run the whole system with Kafka in containers, verify events, troubleshoot |
 | [docs/E2E-VALIDATION-FLOW.txt](docs/E2E-VALIDATION-FLOW.txt) | Manual end-to-end test script |
 | [docs/SWAGGER-TEST-GUIDE.txt](docs/SWAGGER-TEST-GUIDE.txt) | Testing the API through Swagger |
 

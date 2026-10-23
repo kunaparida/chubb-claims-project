@@ -17,7 +17,7 @@ and what was **not**.
 > **How to read the Decision line.** `Decision` is the *author's* call. Where the author has not yet reviewed an entry it says
 > `Pending author review`; it is deliberately not pre-filled. Facts the AI found or got wrong are recorded under *Result* and
 > *Corrections*, not disguised as the author's decisions. The backend entries (Phases 1 to 3) keep the decisions recorded in the
-> original backend journal; the frontend entries F1 to F5 are still pending.
+> original backend journal; the frontend entries F1 to F6 are still pending.
 
 ## 1. Conventions
 
@@ -28,7 +28,7 @@ and what was **not**.
 | **OVERRODE** | The author decided differently from the AI. |
 
 Prompts appear in the order they were sent. Backend entries (Part A) follow the structure *Prompt, Result, Decision, Verification*;
-frontend entries (Part C) add a *Corrections* section and put *Decision* last. Frontend prompts are numbered **F1 to F5** so they
+frontend entries (Part C) add a *Corrections* section and put *Decision* last. Frontend prompts are numbered **F1 to F6** so they
 do not collide with the backend's Prompts 1 to 23.
 
 ## 2. Summary of the work
@@ -40,6 +40,7 @@ do not collide with the backend's Prompts 1 to 23.
 | 3. Submission repository | 14-23 | `C:\project\chubb-claims-backendService` (now `backend/`) | The backend under review. Verified against the assessment brief and extended to close gaps. |
 | 4. Frontend integration | F1-F3 | `C:\project\claim_management_UI` (now `frontend/`) | `CLAUDE.md` and journal first, then all 19 endpoints integrated into one Angular app for three roles, then a manual end-to-end script. |
 | 5. Submission packaging | F4-F5 | repository root | One repository with one README, one ARCHITECTURE and this one journal. |
+| 6. Containerisation | F6 | repository root, `backend/`, `frontend/` | Dockerfiles, a compose file with Kafka, a Kafka configuration check, and `DOCKER.md`. |
 
 ## 3. Key outcomes
 
@@ -243,7 +244,7 @@ Buddy version managed by Spring Boot 3.4.5 does not support JDK 27. It added `by
 These entries were written in the frontend repository before the two repositories were combined. What changed when they were
 carried over (F5 explains why):
 
-* Numbered **F1 to F5** instead of Prompt 1 to 3, so they do not collide with the backend prompts.
+* Numbered **F1 to F6** instead of Prompt 1 to 3, so they do not collide with the backend prompts.
 * Absolute paths inside the entries are the **original** ones and are left as history: `C:\project\claim_management_UI` is now
   `frontend/`, and `C:\project\chubb-claims-backendService` is now `backend/`.
 * **F1:** the closing code fence after the prompt text was missing in the committed journal, so the rest of the entry rendered as
@@ -539,6 +540,69 @@ now I need to submit both project in once so I need both backend and UI in one p
 
 ---
 
+## F6: Dockerize the project, check the Kafka configuration, write the Docker guide
+
+**Prompts** (verbatim; the first is the observation that led to the second)
+```text
+there is no docker file is present in this project
+```
+```text
+you dockerize it and check kafka configuration and also create an md file where you need to list out the steps to install all the things in docker and run all the commands also to make the application succesful up
+```
+
+**Result** (all in the author's working copy `C:\project\chubb-claims-project`; nothing committed)
+
+* `backend/Dockerfile` (Maven build stage on JDK 21, then a JRE-only alpine image, non-root, tests skipped unless
+  `--build-arg SKIP_TESTS=false`), `frontend/Dockerfile` (Node 24 build stage, then nginx), `frontend/nginx.conf` (serves the SPA,
+  falls back to `index.html`, forwards `/api/` to the backend so the missing CORS configuration never matters), and a
+  `.dockerignore` in each app folder.
+* `docker-compose.yml`: single-node Kafka 3.9 in KRaft mode with an internal and a host listener, a one-shot `kafka-init` that creates
+  the topic, the backend (publisher switched to Kafka by environment variables, health check on `/v3/api-docs`), and the frontend on
+  port 4200. `.gitattributes` keeps these files LF on Windows.
+* `DOCKER.md`: installing WSL 2 and Docker Desktop, checking the install, freeing ports, build and run, a step-by-step way to watch
+  events arrive in Kafka (including stopping the broker to show the outbox working), everyday commands, a Kafka configuration table,
+  troubleshooting, and other ways to run.
+* README, root `CLAUDE.md` and the architecture limitations list point to it.
+* **The backend source was not changed.**
+
+**Kafka configuration check: what was found** (details and the Docker setup's answer to each are in `DOCKER.md` part 7)
+
+1. `spring.kafka.bootstrap-servers` is commented out in `application.properties`, so the broker address has to be supplied from
+   outside; compose does it with `SPRING_KAFKA_BOOTSTRAP_SERVERS`, with no code change.
+2. The application never creates its topic, so `kafka-init` does, and broker auto-creation is switched off so a wrong topic name fails
+   loudly.
+3. Serialization works as configured: no producer settings are needed because Spring Boot's String defaults match
+   `KafkaTemplate<String, String>`; the key is the claim id.
+4. Only the claim creation and the status transitions write outbox rows; `pickup` and `assign` do not, which is why picking up a claim
+   shows no event. Checked in `ClaimService`.
+5. **A weakness, not fixed:** with the broker down, `send()` can wait for Kafka's default `max.block.ms` (60 s) before the code's own
+   10 s acknowledgement timeout applies, holding the relay thread and its transaction. The suggested setting
+   (`spring.kafka.producer.properties.max.block.ms=10000`) is in `DOCKER.md`; the author decides whether to add it.
+6. Nothing consumes the events yet; the guide shows how to watch them with the console consumer.
+
+**Corrections**
+
+* While preparing the frontend image the AI tried to run a local production build only to learn the output folder; the author
+  interrupted that command. The folder (`dist/claim-management-ui/browser`) was instead confirmed from the installed Angular
+  builder's schema (default browser folder name `browser`) and the project name in `package.json`.
+* The AI chose a Debian-based Node image (`node:24-slim`) rather than alpine because the lock file was generated on Windows and native
+  build dependencies are less likely to be missing on glibc. This is a judgement, not a tested result.
+
+**Verification**
+
+* Done: the Kafka code and configuration were read in full (`application.properties`, `KafkaEventPublisher`, `OutboxPublisher`,
+  `pom.xml`, `SchedulingConfig`); which operations write events was checked in `ClaimService`; the outbox table name was checked; the
+  Angular output folder was checked as described above.
+* **Not verified, and important:** Docker is **not installed** on this machine, so **no image was built, `docker compose config` was
+  not run, and no container was started.** Not confirmed by running: that `node:24-slim` satisfies Angular 22's Node range at build
+  time, the `apache/kafka:3.9.0` environment variables and health check, the backend health check command, and the nginx
+  configuration. The Kafka publisher has still never run against a real broker. `DOCKER.md` part 5 is the procedure to settle all of
+  this; **the author should run it and record the outcome here.**
+
+**Decision:** `Pending author review`
+
+---
+
 # Part D: Open Questions for the Backend
 
 The frontend does not change the backend. These are things the author may want to change there (or accept as limitations and explain in the walkthrough).
@@ -586,12 +650,14 @@ not filled them in because it would have to invent them.**
 3. **Missing entries.** Prompts 6-23 and design sections B2-B5 are not yet written up in this journal.
 4. **F1 prompt text.** Confirm that the edited block is what you want to show, or replace it with the message that was actually
    sent, or relabel it "cleaned-up prompt" (see the note under F1).
-5. **Decisions for F1 to F5** are all `Pending author review`. Choose ACCEPTED, CHALLENGED or OVERRODE for each, with your reason.
+5. **Decisions for F1 to F6** are all `Pending author review`. Choose ACCEPTED, CHALLENGED or OVERRODE for each, with your reason.
 6. **F3 was reconstructed.** Read it and correct anything that does not match what you remember of that session.
 7. **Backend commit hashes.** The backend history in this repository has the same commits, messages, authors and dates as the
    original, but different hashes, because the committed `.build-cache/` was removed from every commit (see F5). If anyone asks, that
    is why `git log` here does not match the original repository.
-8. **Fresh-clone check.** Clone the repository somewhere clean, run `npm install` in `frontend/`, and follow `README.md` once; F5 records
+8. **Docker run (F6).** Install Docker, follow `DOCKER.md`, and write what happened (including any fix needed) into F6. Decide whether to
+   add `max.block.ms` to the backend's Kafka producer settings.
+9. **Fresh-clone check.** Clone the repository somewhere clean, run `npm install` in `frontend/`, and follow `README.md` once; F5 records
    what was and was not run.
 
 ---
