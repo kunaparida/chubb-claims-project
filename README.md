@@ -1,22 +1,46 @@
-# Claims Platform
+<div align="center">
 
-**Full-stack claims management application** for claim submission, assessment, decision tracking, and management reporting.
+# Claims Management Platform
 
-This repository contains a Spring Boot REST API and an Angular single-page application. The backend is authoritative for business rules and access control; the frontend provides role-specific workflows for claimants, claims officers, and managers.
+**APAC Motor & Property Claims · Explicit Workflows · Traceable Decisions**
 
-APAC motor and property claims: claimants report and track incidents, claims officers work them to a decision and settlement,
-and managers see workload, liability and officer performance. **One repository, two applications:**
+A full-stack claims management application built with **Java, Spring Boot, and Angular** for claim submission, assessment, decision tracking, and management reporting.
 
-| Folder | What it is |
-|---|---|
-| [`backend/`](backend) | REST API — Java 21, Spring Boot 3.4, Spring Security (JWT), Spring Data JPA, H2, optional Kafka events |
-| [`frontend/`](frontend) | Single-page app — Angular 22 (standalone components, signals, zoneless), one app for all three roles |
+[![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-brightgreen?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Angular](https://img.shields.io/badge/Angular-22-DD0031?logo=angular&logoColor=white)](https://angular.dev/)
+[![Database](https://img.shields.io/badge/Database-H2%20%7C%20PostgreSQL-blue)](https://www.postgresql.org/)
+[![Events](https://img.shields.io/badge/Events-Kafka-231F20?logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
+[![Containers](https://img.shields.io/badge/Containers-Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+
+[Quick Start](#run-it-locally) · [Build & Test](#tests) · [API Guide](#the-api-at-a-glance) · [Architecture](ARCHITECTURE.md) · [AI Journal](AI_JOURNAL.md) · [Docker Guide](DOCKER.md)
+
+</div>
+
+---
+
+## What this solves
+
+A small full-stack claims platform that replaces scattered claim tracking with **role-specific workflows, controlled status transitions, and an auditable history**. The backend is authoritative for business rules and access control; the Angular frontend provides the user experience for each role.
 
 | Role | What they can do |
 |---|---|
-| **Claimant** | Register, report an incident, track their claims and their history, answer an officer's request for information, read the decision |
-| **Claims officer** | Work queue (oldest first), pick up a claim, start review, request information, approve / reject, mark settled |
-| **Manager** | Dashboard (open claims, liability per market, officer performance), see all claims, assign claims to officers |
+| **Claimant** | Register, submit incidents, track claims and history, respond to information requests, and read decisions |
+| **Claims officer** | Work the oldest-first queue, pick up or review claims, request information, approve or reject claims, and mark approved claims as settled |
+| **Manager** | View all claims, assign claims to officers, and review workload, liability by market/type, and officer performance |
+
+## Technology stack
+
+| Area | Technologies |
+|---|---|
+| Backend | Java 21, Spring Boot 3.4, Spring MVC, Spring Security with JWT, Spring Data JPA, Bean Validation |
+| Frontend | Angular 22, standalone components, signals, zoneless change detection |
+| Persistence | H2 for local assessment runs; PostgreSQL is a deployment target to validate |
+| Events | Transactional outbox with log publisher by default and optional Kafka publisher |
+| API documentation | OpenAPI / Swagger UI |
+| Packaging | Docker Compose configuration (execution still needs environment validation) |
+
+> **Verification note:** Test counts and build results below are recorded in the project development documentation; they were not rerun as part of this README redesign. Docker Compose and publishing to a real Kafka broker remain unverified in the available evidence.
 
 ## Repository layout
 
@@ -31,7 +55,7 @@ AI_JOURNAL.md                            one AI working journal: what was asked,
 CLAUDE.md                                guidance for AI assistants working in this repository
 ```
 
-## Run it locally
+## Quick start — run it locally
 
 **You need:** JDK 21 or newer, Maven 3.6.3+ (what Spring Boot 3.4 requires), and Node 22.22.3+, 24.15+ or 26+ (the range Angular 22 requires; the frontend was built and
 tested with Node 26 and npm 11).
@@ -75,7 +99,7 @@ environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=fa
 > cannot call port 8080 directly (the browser blocks the cross-origin call). `npm start` proxies `/api` to the backend
 > (`frontend/proxy.conf.json`), so always use `http://localhost:4200`. See [ARCHITECTURE.md](ARCHITECTURE.md), part D.
 
-## Run it with Docker (backend + frontend + Kafka)
+## Run with Docker Compose (backend + frontend + Kafka)
 
 > **Validation status:** Docker and Kafka configuration is documented, but the available development record does not contain a successful `docker compose up` run. Treat the container workflow as pending validation until it has been built and tested in your environment.
 
@@ -88,7 +112,7 @@ docker compose up --build -d
 Then open <http://localhost:4200>. **[DOCKER.md](DOCKER.md)** has the full steps: installing WSL 2 and Docker Desktop, checking the install,
 watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. The stack is intended to run the backend (in-memory H2 database), the frontend behind nginx, and a single-node Kafka broker. The H2 console is enabled in the documented configuration and must not be exposed in a shared or production environment. See `DOCKER.md` for setup and verification steps.
 
-## Try it end to end
+## Validate the application end to end
 
 * **`docs/E2E-VALIDATION-FLOW.txt`** — a tick-box script with fixed test data (two claimants, three claims) that exercises every
   role and checks the dashboard numbers at six checkpoints (A-F) and a final state. It takes 25-30 minutes. Restart the backend first so you start clean.
@@ -96,7 +120,7 @@ watching events arrive in Kafka, every day-to-day command, a Kafka configuration
 * **Postman** — `backend/postman/Claims-Management.postman_collection.json`: run the requests in collection order; the login
   requests capture the tokens and ids into collection variables.
 
-## The API at a glance
+## API overview
 
 All endpoints except register and login need `Authorization: Bearer <token>`. Errors are RFC 7807 `application/problem+json`.
 
@@ -138,7 +162,7 @@ than zero with at most two decimals; incident date not in the future; `market` a
 }
 ```
 
-## Events (transactional outbox)
+## Event publishing — transactional outbox
 
 Every status change writes an audit row **and** an outbox row in the same database transaction. A scheduled relay publishes
 unpublished rows as `ClaimStatusChanged` events and marks them published (at-least-once; each event has an `eventId` for
@@ -154,7 +178,7 @@ de-duplication; the claim id is the Kafka key so one claim's events stay in orde
 The Kafka publisher is wired and unit-tested but has **not** been run against a real broker; the Docker stack above provides one, and
 `DOCKER.md` part 5 is how to prove it.
 
-## Tests
+## Build and test
 
 ```bash
 cd backend  && mvn test                         # unit + Spring Boot integration tests (H2)
@@ -166,7 +190,7 @@ Backend tests cover the service rules, the audit recorder, the outbox relay and 
 Spring Boot tests (82 tests). Frontend tests cover the API contract (every verb, path and body),
 the interceptor and guards, an exhaustive check of the UI's "who can do what" table against the backend workflow, and each screen.
 
-## Documentation
+## Project documentation
 
 | File | What is in it |
 |---|---|
