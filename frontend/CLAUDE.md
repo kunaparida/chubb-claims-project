@@ -27,7 +27,8 @@ a manual browser walkthrough (register → report → pick up → review → req
 `npm run build` is clean (≈293 kB initial, one lazy chunk per page).
 
 Not yet verified in a real browser: officer approve/reject/settle and the manager's assign picker (covered by unit tests and the
-scripted API run), dark mode, and narrow/mobile layouts. The UI's own commit history is preserved in this repository.
+scripted API run), dark mode, and narrow/mobile layouts. In Docker, `Dockerfile` and `nginx.conf` here serve the production build and forward
+`/api` to the backend (see `../DOCKER.md`); no run result of that stack is recorded yet.
 
 ### Layout of `src/app`
 
@@ -50,7 +51,7 @@ Routes: `/login`, `/register`; signed-in: `/claims` (role-scoped list), `/claims
 * Tests: **Vitest** through `@angular/build:unit-test` (jsdom). Not Karma/Jasmine.
 * Prettier (`.prettierrc`): `printWidth 100`, single quotes, Angular parser for `*.html`.
 * File naming is the current Angular style: `app.ts` / `app.html` / `app.css` — **no `.component` suffix**. Selector prefix `app`.
-* `package.json` pins `npm@11.17.0`; this machine has Node v26.3.1.
+* `package.json` pins `npm@11.17.0`. Angular 22 needs Node 22.22.3+, 24.15+ or 26+; built and tested here with Node 26.
 
 ```bash
 npm install

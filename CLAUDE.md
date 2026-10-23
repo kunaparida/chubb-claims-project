@@ -8,26 +8,41 @@ One repository, two applications, one set of documents:
 
 | Path | What | Rules for working in it |
 |---|---|---|
-| `backend/` | Spring Boot 3.4 / Java 21 REST API (owner of the API contract) | [backend/CLAUDE.md](backend/CLAUDE.md) |
+| `backend/` | Spring Boot 3.4 / Java 21 REST API on in-memory H2 (owner of the API contract) | [backend/CLAUDE.md](backend/CLAUDE.md) |
 | `frontend/` | Angular 22 single-page app for claimants, officers and managers | [frontend/CLAUDE.md](frontend/CLAUDE.md) |
 | `README.md` | How to run it, accounts, API summary | keep it the single entry point |
 | `ARCHITECTURE.md` | Backend (part B), frontend (part C), integration (part D), limitations (part E) | update it when a design decision changes |
-| `AI_JOURNAL.md` | How AI was used: backend Parts A–B, frontend Part C (F-numbers), open questions Part D, limitations E, open items F | see below |
+| `AI_JOURNAL.md` | How AI was used: backend Parts A–B, frontend and packaging Part C (F-numbers), open questions D, limitations E, open items F | see rule 4 |
 | `docs/` | `E2E-VALIDATION-FLOW.txt` (manual test script), `SWAGGER-TEST-GUIDE.txt` | keep the numbers in the E2E script true when behaviour changes |
 | `docker-compose.yml`, `DOCKER.md`, `*/Dockerfile`, `frontend/nginx.conf` | Containers: Kafka + backend + frontend | keep `DOCKER.md` and the compose file in step; the topic name appears in compose twice and must match `EVENTS_TOPIC` |
+
+## Common commands
+
+| Task | Command (run from the folder shown) |
+|---|---|
+| Run the backend (port 8080) | `mvn spring-boot:run` in `backend/` |
+| Backend tests (82) | `mvn test` in `backend/` |
+| Run the UI (port 4200, proxies `/api` to 8080) | `npm install` once, then `npm start` in `frontend/` |
+| UI tests (216) and production build | `npm test -- --no-watch`, `npm run build` in `frontend/` |
+| Everything in containers (Kafka included) | `docker compose up --build -d` in the repository root, then see `DOCKER.md` |
 
 ## Rules that apply to everything
 
 1. **The backend owns the contract.** UI work never edits `backend/`; if the backend needs a change, record it in `AI_JOURNAL.md` Part D
    and ask the author. A backend change that alters an endpoint also changes `frontend/` (API service, models, tests) in the same commit.
-2. **Run commands from the folder they belong to:** `mvn ...` in `backend/`, `npm ...` in `frontend/`. Start the backend first; the UI
-   reaches it through the dev proxy (`frontend/proxy.conf.json`), so always browse `http://localhost:4200`.
-3. **Tests are part of the change.** Backend: `mvn test` (82 tests). Frontend: `npm test -- --no-watch` (216 tests) and `npm run build`.
-   A behaviour change needs a test change in the same commit.
-4. **Update `AI_JOURNAL.md` in the same change as any non-trivial AI-driven step.** Be honest: record what was corrected or rejected,
-   not just what worked, and what was *not* verified. Leave `Decision` lines for the author (`Pending author review`); never invent
-   the author's decisions or fill in history you did not witness.
-5. **Commit only when asked.** Small, conventional commits (`feat(api): …`, `feat(ui): …`, `test: …`, `docs: …`), one concern each.
-6. **Ask before installing or downloading anything. Never commit tokens, passwords or build output** (`target/`, `dist/`,
+2. **Run commands from the folder they belong to.** Start the backend first; the UI reaches it through the dev proxy
+   (`frontend/proxy.conf.json`), or through nginx in Docker, so always browse `http://localhost:4200`.
+3. **Tests are part of the change.** A behaviour change needs a test change in the same commit, and the counts above and in the
+   documents are kept true.
+4. **Keep the journal short and honest.** Update `AI_JOURNAL.md` in the same change as any AI-driven step that **mattered**: it set the
+   design, found or fixed a defect, changed the repository, or the AI was corrected. Do not log routine prompts. Record what was corrected
+   or rejected, not just what worked, and what was *not* verified. Leave `Decision` lines for the author (`Pending author review`);
+   never invent the author's decisions or fill in history you did not witness.
+5. **The documents must match the project.** When code, configuration, ports, accounts or test counts change, fix `README.md`,
+   `ARCHITECTURE.md` and `DOCKER.md` in the same change; check claims against the source instead of from memory.
+6. **Commit only when asked.** Small, conventional commits (`feat(api): …`, `feat(ui): …`, `test: …`, `docs: …`), one concern each.
+7. **Ask before installing or downloading anything. Never commit tokens, passwords or build output** (`target/`, `dist/`,
    `node_modules/`, `.build-cache/` are ignored by the root `.gitignore`).
-7. The in-memory database resets on every backend restart; restart before running `docs/E2E-VALIDATION-FLOW.txt`.
+8. **The database is in-memory H2.** It resets on every backend restart (restart before running `docs/E2E-VALIDATION-FLOW.txt`).
+   PostgreSQL is *not* used and has no driver in `pom.xml`; do not add one unless asked. The H2 console (`/h2-console`) is enabled and
+   needs no token: local development only, never for a shared deployment.
