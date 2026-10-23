@@ -65,7 +65,7 @@ environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=fa
 |---|---|
 | `http://localhost:4200` | the application |
 | `http://localhost:8080/swagger-ui/index.html` | API documentation (OpenAPI JSON at `/v3/api-docs`) |
-| `http://localhost:8080/h2-console` | database console — JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`, empty password |
+| `http://localhost:8080/h2-console` | database console, enabled for local development: JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`, empty password. **It needs no sign-in, so switch it off (`spring.h2.console.enabled=false`) anywhere shared** |
 
 > **Why the frontend talks to the backend through a proxy.** The backend has no CORS configuration, so a browser on port 4200
 > cannot call port 8080 directly (the browser blocks the cross-origin call). `npm start` proxies `/api` to the backend
@@ -81,8 +81,10 @@ docker compose up --build -d
 ```
 
 Then open <http://localhost:4200>. **[DOCKER.md](DOCKER.md)** has the full steps: installing WSL 2 and Docker Desktop, checking the install,
-watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. These Docker files have
-not been run yet (see the status note at the top of DOCKER.md).
+watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. The stack is the backend
+(same in-memory H2 database, H2 console included, restarted automatically unless you stop it), the frontend behind nginx, and a
+single-node Kafka. The Docker files were written without Docker available to the AI, and no run result is recorded yet: see the status
+note at the top of DOCKER.md.
 
 ## Try it end to end
 
@@ -143,11 +145,12 @@ de-duplication; the claim id is the Kafka key so one claim's events stay in orde
 | Setting | Default | Meaning |
 |---|---|---|
 | `app.events.publisher` (`EVENTS_PUBLISHER`) | `log` | `log` writes the event to the application log (no broker needed); `kafka` publishes to Kafka |
-| `spring.kafka.bootstrap-servers` | not set | Required when the publisher is `kafka` |
+| `spring.kafka.bootstrap-servers` | not set (commented out) | Required when the publisher is `kafka`; supply it as the property or the environment variable `SPRING_KAFKA_BOOTSTRAP_SERVERS` |
 | `app.events.topic` (`EVENTS_TOPIC`) | `claims.claim-status-changed` | Target topic |
 | `app.outbox.poll-ms` (`OUTBOX_POLL_MS`) | `5000` | Relay interval |
 
-The Kafka publisher is wired and unit-tested but has **not** been run against a real broker.
+The Kafka publisher is wired and unit-tested but has **not** been run against a real broker; the Docker stack above provides one, and
+`DOCKER.md` part 5 is how to prove it.
 
 ## Tests
 
@@ -166,7 +169,7 @@ the interceptor and guards, an exhaustive check of the UI's "who can do what" ta
 | File | What is in it |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System overview; backend design and security; frontend structure; integration decisions (contract, proxy, auth, money); limitations and next steps |
-| [AI_JOURNAL.md](AI_JOURNAL.md) | How AI was used: every prompt, what was accepted, challenged or overridden, and what was and was not verified |
+| [AI_JOURNAL.md](AI_JOURNAL.md) | How AI was used: the prompts that shaped the design or found defects, what was accepted, challenged or overridden, and what was and was not verified |
 | [backend/CLAUDE.md](backend/CLAUDE.md), [frontend/CLAUDE.md](frontend/CLAUDE.md), [CLAUDE.md](CLAUDE.md) | Working rules for AI assistants, per area |
 | [DOCKER.md](DOCKER.md) | Install Docker, run the whole system with Kafka in containers, verify events, troubleshoot |
 | [docs/E2E-VALIDATION-FLOW.txt](docs/E2E-VALIDATION-FLOW.txt) | Manual end-to-end test script |
@@ -174,6 +177,7 @@ the interceptor and guards, an exhaustive check of the UI's "who can do what" ta
 
 ## Known limitations
 
-Listed honestly in [ARCHITECTURE.md](ARCHITECTURE.md), part E. The ones a reviewer will meet first: in-memory database (data resets on
-restart), no CORS on the backend (hence the proxy), no currency on claims (amounts are shown with their market and the
-dashboard total is labelled "unconverted"), and no optimistic locking on the backend.
+Listed honestly in [ARCHITECTURE.md](ARCHITECTURE.md), part E. The ones a reviewer will meet first: in-memory H2 database (data resets on
+restart) with an unauthenticated H2 console, no CORS on the backend (hence the proxy), no currency on claims (amounts are shown with
+their market and the dashboard total is labelled "unconverted"), no optimistic locking on the backend, and a Docker stack whose run result
+is not yet recorded.

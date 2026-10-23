@@ -26,7 +26,7 @@ contract, the HTTP API.
  Dev proxy (frontend/proxy.conf.json:  /api → http://localhost:8080)
    │
    ▼
- Spring Boot service :8080 ──► H2 in-memory database (PostgreSQL config provided)
+ Spring Boot service :8080 ──► H2 in-memory database (PostgreSQL appears only as a commented example)
    │                           outbox_events ─► scheduled relay ─► log (default) or Kafka
    └─ Swagger UI / OpenAPI at /swagger-ui/index.html, /v3/api-docs
 ```
@@ -43,10 +43,11 @@ them. Where the backend lacks something the UI would like (CORS, an officers end
 around it and the gap is written down in [part D](#part-d-integration-decisions) and [part E](#part-e-known-limitations-and-next-steps).
 
 **Containers.** `docker-compose.yml` runs three long-lived containers and one setup job: Kafka (single node, KRaft), the backend
-(`EVENTS_PUBLISHER=kafka`), the frontend (nginx), and `kafka-init`, which creates the topic. In this layout nginx plays the role of
-the dev proxy: the browser only talks to port 4200 and nginx forwards `/api/` to the backend, so the backend's missing CORS
-configuration still does not matter (see D.2). Details and the Kafka configuration check are in [DOCKER.md](DOCKER.md); the Docker files
-have not been run yet.
+(`EVENTS_PUBLISHER=kafka`, same in-memory H2 database, H2 console enabled, `restart: unless-stopped`), the frontend (nginx), and
+`kafka-init`, which creates the topic. In this layout nginx plays the role of the dev proxy: the browser only talks to port 4200 and nginx
+forwards `/api/` to the backend, so the backend's missing CORS configuration still does not matter (see D.2). Details and the Kafka
+configuration check are in [DOCKER.md](DOCKER.md). The Docker files were written without Docker available to the AI and no run result
+is recorded yet (see `AI_JOURNAL.md` F5).
 
 **One app, three roles.** The brief asks for both user types to use the same Angular application. The JWT carries the role;
 the shell shows role-specific navigation and each page is behind a role guard.
@@ -72,7 +73,7 @@ the shell shows role-specific navigation and each page is behind a role guard.
                           │ repository  (Spring Data JPA, aggregate queries)       │
                           └───────────────────────────┬───────────────────────────┘
                                                       ▼
-                          H2 (default)  /  PostgreSQL (config provided)
+                          H2 in-memory  (PostgreSQL: commented example only)
                           tables: users, claims, claim_status_history, outbox_events
                                                       │
                   OutboxPublisher (scheduled) ────────┘──► EventPublisher
@@ -185,6 +186,10 @@ JWT (HS256) in `Authorization: Bearer`, stateless; BCrypt passwords; method secu
 
 Other claimants' or officers' claims return **404**, not 403, so existence is not leaked. Public registration can only
 create claimants.
+
+Reachable **without a token**: `POST /api/auth/register` and `/login`, Swagger UI and the OpenAPI document, `/error`, and the **H2
+console** (`/h2-console/**`, enabled with `web-allow-others` for local development). The console lets anyone who can reach the port read and
+change the database, so it must be switched off (`spring.h2.console.enabled=false`) before any shared deployment.
 
 ### B.6 Error model
 RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map for field validation.
@@ -351,10 +356,11 @@ be found." (404). After a failed action the claim is reloaded so the screen show
 | Limitation | Next step |
 |---|---|
 | No optimistic locking: two officers acting at the same instant could race | Add `@Version` to `Claim`, map the conflict to 409 |
-| Kafka path wired and unit-tested but **not run against a real broker** (a Docker Compose with Kafka now exists, `DOCKER.md`, but has not been run) | Run it; add an integration test (Testcontainers) |
+| Kafka path wired and unit-tested but **not run against a real broker** (a Docker Compose with Kafka exists, `DOCKER.md`, but no run result is recorded) | Run it; add an integration test (Testcontainers) |
 | With the broker down, `KafkaTemplate.send` can block up to Kafka's default `max.block.ms` (60 s) before the 10 s acknowledgement timeout applies, holding the relay thread and its transaction | `spring.kafka.producer.properties.max.block.ms=10000` |
 | Outbox poller runs in every instance, so duplicates are possible with several instances | Row locking (`FOR UPDATE SKIP LOCKED`) or a dedicated relay |
-| `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL, real user provisioning |
+| `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL (add the driver; the datasource example is already commented in `application.properties`), real user provisioning |
+| The H2 console is enabled, permitted without a token and open to other hosts (`web-allow-others`), in `application.properties` and in the Docker compose file | Disable it outside local development (`spring.h2.console.enabled=false`) and remove the `/h2-console/**` rule from `SecurityConfig` |
 | `assignedOfficer` can be re-assigned without a history entry; rejected and settled claims can still be reassigned | Record assignment events; refuse assignment of terminal claims |
 | Performance dashboard counts only; no time-to-decision | Use `claim_status_history` timestamps |
 | No claimant notifications | Consumer of `ClaimStatusChanged` (the seam exists) |
@@ -369,6 +375,6 @@ be found." (404). After a failed action the claim is reloaded so the screen show
 | No officers endpoint; the manager picker borrows the performance endpoint | `GET /api/users?role=OFFICER` |
 | No currency on claims: amounts are shown by market and the cross-market totals are labelled unconverted | Add `currency` to the claim and convert (or stop summing) on the server |
 | The session token is in `localStorage`, readable by any script on the page (XSS) | Short-lived access token in memory plus a refresh token in an httpOnly cookie |
-| Officer approve/reject/settle and the manager assign picker were covered by unit tests and a scripted API run, **not clicked through in a browser by the author of the code**; dark mode and narrow/mobile layouts were not checked | Run `docs/E2E-VALIDATION-FLOW.txt` in a browser; add Playwright end-to-end tests |
+| Officer approve/reject/settle and the manager assign picker were covered by unit tests and a scripted API run, **not clicked through in a browser by the AI that wrote them**; dark mode and narrow/mobile layouts were not checked | Run `docs/E2E-VALIDATION-FLOW.txt` in a browser; add Playwright end-to-end tests |
 | No browser-level automated tests; no accessibility audit | Playwright plus an axe pass in CI |
 | Lists and the queue are paged (10 per page) but never auto-refresh, so a second officer picking up a claim is only noticed on reload or on a 409 | Periodic refresh or server-sent events for the queue |

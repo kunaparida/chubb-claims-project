@@ -5,17 +5,18 @@ This guide takes you from a machine with no Docker to the whole system running: 
 | Container | What it is | Where you reach it |
 |---|---|---|
 | `frontend` | Angular app served by nginx; nginx forwards `/api/...` to the backend | **http://localhost:4200** |
-| `backend` | Spring Boot API (in-memory H2 database) | http://localhost:8080 · Swagger: http://localhost:8080/swagger-ui/index.html |
+| `backend` | Spring Boot API (in-memory H2 database, H2 console on; restarted automatically unless stopped) | http://localhost:8080 · Swagger: http://localhost:8080/swagger-ui/index.html · H2 console: http://localhost:8080/h2-console |
 | `kafka` | Single-node Apache Kafka 3.9 (KRaft mode, no ZooKeeper) | `kafka:9092` inside Docker, `localhost:9094` from your machine |
 | `kafka-init` | One-shot job that creates the topic `claims.claim-status-changed`, then exits | not a server |
 
 Files that make this work: `docker-compose.yml` (root), `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/nginx.conf`, and a `.dockerignore` in each app folder.
 
 > **Status of these files (read this first).** They were written and reviewed against the project's code and Spring Boot / Angular / Kafka
-> conventions, but **Docker is not installed on the machine they were written on, so nothing has been built or started yet.** The
-> backend and frontend themselves were built and tested (82 and 216 tests), and the Kafka path has only ever been unit-tested against a
-> mocked `KafkaTemplate`. Part 5 below is how you prove it for real; if a step fails, [part 8](#8-troubleshooting) and
-> `docker compose logs` will say why, and please record the result in `AI_JOURNAL.md` (entry F6).
+> conventions, but **Docker was not available to the AI that wrote them, so it never built an image or started a container.** The
+> author has since edited the compose file (a restart policy and the H2 console settings on the backend), but no run result is
+> recorded anywhere. The backend and frontend themselves were built and tested (82 and 216 tests), and the Kafka path has only ever been
+> unit-tested against a mocked `KafkaTemplate`. Part 5 below is how you prove it for real; if a step fails, [part 8](#8-troubleshooting)
+> and `docker compose logs` will say why, and please record the result in `AI_JOURNAL.md` (entry F5).
 
 ## Contents
 
@@ -190,6 +191,8 @@ Within one to two poll intervals the consumer from 5.2 (restart it if it exited)
 
 **5.5 Cross-check with the database console** (optional): open http://localhost:8080/h2-console, JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`,
 empty password, then run `SELECT * FROM OUTBOX_EVENTS;`. Published rows have a publish timestamp; a row without one has not reached Kafka yet.
+The compose file turns the console on and lets other hosts reach it (`SPRING_H2_CONSOLE_ENABLED`, `SPRING_H2_CONSOLE_SETTINGS_WEB_ALLOW_OTHERS`)
+so that your browser, outside the container, can open it. It needs no sign-in: use it only on your own machine.
 
 ## 6. Everyday commands
 
@@ -211,6 +214,9 @@ empty password, then run `SELECT * FROM OUTBOX_EVENTS;`. Published rows have a p
 **Data to expect:** the backend database is in memory, so **every backend restart erases all accounts and claims** (the officer and manager
 are re-created). Kafka has no volume either, so `docker compose down` erases the topic and its events; `stop`/`start` keeps them.
 
+**Restart policy:** the backend has `restart: unless-stopped`, so Docker starts it again if it crashes (and after a Docker restart), which also
+wipes its in-memory data. If the backend keeps restarting, `docker compose logs backend` shows each start-up and the error behind it.
+
 ## 7. Kafka configuration check
 
 What was checked in the code (`application.properties`, `KafkaEventPublisher`, `OutboxPublisher`, `pom.xml`) and what this setup does about it:
@@ -224,7 +230,7 @@ What was checked in the code (`application.properties`, `KafkaEventPublisher`, `
 | Serialization | No producer settings; Spring Boot defaults to String key and String value, matching `KafkaTemplate<String, String>` | Nothing to do. Key = claim id, so one claim's events stay ordered in one partition; value = the JSON event |
 | Delivery | The relay waits up to 10 s for the broker acknowledgement and marks the row published only afterwards; at-least-once | Consumers must de-duplicate on `eventId` (documented in `ARCHITECTURE.md` part B.3) |
 | Relay scheduling | `@EnableScheduling` is present (`SchedulingConfig`); poll every `OUTBOX_POLL_MS` (5 s), 50 rows per run | Compose sets `OUTBOX_POLL_MS=5000` |
-| **Broker-down behaviour** | By Kafka's default `max.block.ms` (60 s), `send()` can wait up to a minute for broker metadata *before* the 10 s acknowledgement timeout starts, holding the relay thread and its database transaction meanwhile | **Not changed** (backend code untouched). Recommended: `spring.kafka.producer.properties.max.block.ms=10000` in `application.properties` |
+| **Broker-down behaviour** | By Kafka's default `max.block.ms` (60 s), `send()` can wait up to a minute for broker metadata *before* the 10 s acknowledgement timeout starts, holding the relay thread and its database transaction meanwhile | **Not changed** (the Kafka settings are as they were). Recommended: `spring.kafka.producer.properties.max.block.ms=10000` in `application.properties` |
 | Consumers | Nothing in the application consumes the events yet; they are for future notification/reporting services | Use the console consumer in 5.2 to observe them |
 | Broker setup | Single node, replication factor 1, PLAINTEXT, no data volume | Fine for local and demo use; **not** production configuration |
 | Test coverage | The Kafka publisher is unit-tested with a mocked template; it had never run against a real broker | This compose file is the first real test: run part 5 and record the outcome |

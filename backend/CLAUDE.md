@@ -26,8 +26,7 @@ This repository is intended to demonstrate clean architecture, business-rule enf
 - Spring Data JPA
 - Spring Security
 - JWT Authentication (jjwt 0.12)
-- PostgreSQL
-- H2 (development)
+- H2 in-memory (the database in use; the PostgreSQL datasource is only a commented example, with no driver)
 - MapStruct
 - Lombok
 - OpenAPI / Swagger
@@ -255,6 +254,8 @@ item and either change the code to match this file or change this file to match 
 | A claim must be assigned before review | Enforced for **officers** (only the assigned officer may act). **Managers** can review an unassigned claim. |
 | Rejected and settled claims cannot be reassigned | **Not enforced** in `ClaimService.assign`. |
 | Officers may access claims assigned to them | Also true for **unassigned** claims, so they can read the queue (`GET /api/claims/queue`) and pick them up. Other officers' claims return 404. |
+| Only the API is public: register, login, Swagger | `SecurityConfig` also permits **`/h2-console/**` without a token** and keeps `X-Frame-Options: sameOrigin` so the H2 console can open; `application.properties` enables the console with `web-allow-others=true`. This is for local development only. The previous filter chain is still in the file as commented-out code below the active one. |
+| The whole API is reachable from any front end | **No CORS configuration.** A browser on another origin is blocked; the UI uses the Angular dev proxy (or nginx in Docker). |
 
 ## Features added after this file's rules were written
 
