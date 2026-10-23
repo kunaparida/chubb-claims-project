@@ -25,22 +25,59 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+
+
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter,
-                                            AuthenticationEntryPoint entryPoint,
-                                            AccessDeniedHandler deniedHandler) throws Exception {
+    SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            JwtAuthenticationFilter jwtFilter,
+            AuthenticationEntryPoint entryPoint,
+            AccessDeniedHandler deniedHandler) throws Exception {
+
         return http
                 .csrf(AbstractHttpConfigurer::disable)
-                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
+                .headers(headers ->
+                        headers.frameOptions(frame -> frame.sameOrigin()))
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler(deniedHandler))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/register", "/api/auth/login", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**",
-                                "/h2-console/**", "/error").permitAll()
+                        .requestMatchers("/h2-console/**").permitAll()
+                        .requestMatchers(
+                                "/api/auth/register",
+                                "/api/auth/login",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs/**",
+                                "/error"
+                        ).permitAll()
                         .anyRequest().authenticated())
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(
+                        jwtFilter,
+                        UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
+
+
+
+//    @Bean
+//    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter,
+//                                            AuthenticationEntryPoint entryPoint,
+//                                            AccessDeniedHandler deniedHandler) throws Exception {
+//        return http
+//                .csrf(AbstractHttpConfigurer::disable)
+//                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
+//                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+//                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
+//                .authorizeHttpRequests(auth -> auth
+//                        .requestMatchers("/api/auth/register", "/api/auth/login", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**",
+//                                "/h2-console/**", "/error").permitAll()
+//                        .anyRequest().authenticated())
+//                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+//                .build();
+//    }
 
     @Bean
     PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
