@@ -5,7 +5,7 @@ and managers see workload, liability and officer performance. **One repository, 
 
 | Folder | What it is |
 |---|---|
-| [`backend/`](backend) | REST API — Java 21, Spring Boot 3.4, Spring Security (JWT), Spring Data JPA, H2, optional Kafka events |
+| [`backend/`](backend) | REST API — Java 21, Spring Boot 3.4, Spring Security (JWT), Spring Data JPA, PostgreSQL, optional Kafka events |
 | [`frontend/`](frontend) | Single-page app — Angular 22 (standalone components, signals, zoneless), one app for all three roles |
 
 | Role | What they can do |
@@ -29,20 +29,31 @@ CLAUDE.md                                guidance for AI assistants working in t
 
 ## Run it locally
 
-**You need:** JDK 21 or newer, Maven 3.6.3+ (what Spring Boot 3.4 requires), and Node 22.22.3+, 24.15+ or 26+ (the range Angular 22 requires; the frontend was built and
-tested with Node 26 and npm 11).
+**You need:** JDK 21 or newer, Maven 3.6.3+ (what Spring Boot 3.4 requires), Node 22.22.3+, 24.15+ or 26+ (the range Angular 22 requires; the frontend was built and
+tested with Node 26 and npm 11), and **a PostgreSQL database** (the backend no longer has an embedded one).
 
-**1. Start the backend** (first, always):
+**1. Start PostgreSQL.** The backend expects database `claimsdb` with user `claims` / password `change-me` on `localhost:5432`.
+The easiest way is the container in this repository:
+
+```bash
+docker compose up -d postgres
+```
+
+Already have PostgreSQL (in Docker or installed)? Create the user and database in it, or point the backend at yours with the
+environment variables `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`: see [DOCKER.md](DOCKER.md) part 9, which has the exact commands.
+
+**2. Start the backend:**
 
 ```bash
 cd backend
 mvn spring-boot:run
 ```
 
-The API listens on `http://localhost:8080`. The database is **in memory and resets on every restart** (accounts and
-claims are lost; the two staff accounts below are re-created).
+The API listens on `http://localhost:8080`. It creates its tables in PostgreSQL on first start, and **the data now persists** across
+restarts (the two staff accounts below are created only if missing). To start from an empty database, see "Reset the data" in
+[DOCKER.md](DOCKER.md) part 6.
 
-**2. Start the frontend** (second terminal):
+**3. Start the frontend** (second terminal):
 
 ```bash
 cd frontend
@@ -50,7 +61,7 @@ npm install
 npm start
 ```
 
-**3. Open <http://localhost:4200>** and sign in.
+**4. Open <http://localhost:4200>** and sign in.
 
 | Account | Email | Password |
 |---|---|---|
@@ -65,16 +76,16 @@ environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=fa
 |---|---|
 | `http://localhost:4200` | the application |
 | `http://localhost:8080/swagger-ui/index.html` | API documentation (OpenAPI JSON at `/v3/api-docs`) |
-| `http://localhost:8080/h2-console` | database console — JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`, empty password |
+| `localhost:5432`, database `claimsdb` | PostgreSQL (user `claims`); with the Docker container: `docker compose exec postgres psql -U claims -d claimsdb` |
 
 > **Why the frontend talks to the backend through a proxy.** The backend has no CORS configuration, so a browser on port 4200
 > cannot call port 8080 directly (the browser blocks the cross-origin call). `npm start` proxies `/api` to the backend
 > (`frontend/proxy.conf.json`), so always use `http://localhost:4200`. See [ARCHITECTURE.md](ARCHITECTURE.md), part D.
 
-## Run it with Docker (backend + frontend + Kafka)
+## Run it with Docker (PostgreSQL + backend + frontend + Kafka)
 
-With Docker Desktop installed and ports 4200, 8080 and 9094 free, one command builds and starts everything, including a Kafka broker
-that receives the claim events:
+With Docker Desktop installed and ports 4200, 8080, 5432 and 9094 free, one command builds and starts everything, including PostgreSQL
+(data kept in a Docker volume) and a Kafka broker that receives the claim events:
 
 ```bash
 docker compose up --build -d
@@ -87,7 +98,7 @@ not been run yet (see the status note at the top of DOCKER.md).
 ## Try it end to end
 
 * **`docs/E2E-VALIDATION-FLOW.txt`** — a tick-box script with fixed test data (two claimants, three claims) that exercises every
-  role and checks the dashboard numbers at six checkpoints (A-F) and a final state. It takes 25-30 minutes. Restart the backend first so you start clean.
+  role and checks the dashboard numbers at six checkpoints (A-F) and a final state. It takes 25-30 minutes. Start from an **empty database** (PostgreSQL keeps data between runs, so reset it first: [DOCKER.md](DOCKER.md) part 6).
 * **Swagger** — `docs/SWAGGER-TEST-GUIDE.txt` explains how to authorise and call each endpoint.
 * **Postman** — `backend/postman/Claims-Management.postman_collection.json`: run the requests in collection order; the login
   requests capture the tokens and ids into collection variables.
@@ -152,7 +163,7 @@ The Kafka publisher is wired and unit-tested but has **not** been run against a 
 ## Tests
 
 ```bash
-cd backend  && mvn test                         # unit + Spring Boot integration tests (H2)
+cd backend  && mvn test                         # unit + Spring Boot integration tests (in-memory H2 in PostgreSQL mode: no database server needed)
 cd frontend && npm test -- --no-watch           # Vitest: 216 unit/component tests
 cd frontend && npm run build                    # strict production build
 ```
@@ -174,6 +185,6 @@ the interceptor and guards, an exhaustive check of the UI's "who can do what" ta
 
 ## Known limitations
 
-Listed honestly in [ARCHITECTURE.md](ARCHITECTURE.md), part E. The ones a reviewer will meet first: in-memory database (data resets on
-restart), no CORS on the backend (hence the proxy), no currency on claims (amounts are shown with their market and the
+Listed honestly in [ARCHITECTURE.md](ARCHITECTURE.md), part E. The ones a reviewer will meet first: the schema is created by Hibernate
+(`ddl-auto=update`) instead of migrations, and the PostgreSQL setup has not yet run against a real server; no CORS on the backend (hence the proxy), no currency on claims (amounts are shown with their market and the
 dashboard total is labelled "unconverted"), and no optimistic locking on the backend.

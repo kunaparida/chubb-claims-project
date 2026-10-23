@@ -19,14 +19,18 @@
 
  0.1  What you need installed
       [ ] JDK 21+ and Maven          (for the backend)
+      [ ] PostgreSQL running with database claimsdb, user claims   (README step 1; docker compose up -d postgres)
       [ ] Node 22.22.3+, 24.15+ or 26+ and npm  (for the UI; Angular 22's range)   check: node --version
 
  0.2  Start the BACKEND  (folder: backend/ in this repository)
           mvn spring-boot:run
       Wait for the log line:   Started ClaimsManagementApplication
       [ ] Open http://localhost:8080/swagger-ui/index.html  -> the Swagger page loads
-      IMPORTANT: the database is in memory. EVERY restart of the backend erases all accounts and
-      claims. Restart it before this flow so you start clean (expected: no claims at all).
+      IMPORTANT: the database is PostgreSQL and KEEPS its data between runs. Start this flow from an EMPTY
+      database (expected: no claims at all). With the Docker setup, reset it, then restart the backend:
+          docker compose exec postgres psql -U claims -d claimsdb -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+      (details: DOCKER.md part 6). The EXPECT numbers below were produced on the earlier in-memory database;
+      they do not depend on the database engine, but this flow has not yet been re-run on PostgreSQL.
 
  0.3  Start the UI  (folder: frontend/ in this repository)
           npm install        (first time only)
@@ -434,12 +438,13 @@
        backend is down; the UI recognises that and shows this message. Checked by calling the proxy while
        the backend was stopped.)
 
- 11.4 Backend restarted = data gone (the database is in memory).
+ 11.4 Backend restarted = data stays (the database is PostgreSQL).
       DO: Start the backend again. Reload the UI while still signed in as Alice (or Bob).
-      EXPECT: [ ] You are sent back to the sign-in page (the account no longer exists, the backend answers
-                  401, and the UI signs you out). The seeded officer/manager can sign in again; their
-                  claim list is empty.
-      This is expected behaviour, not a bug. Re-register Alice/Bob to run the flow again.
+      EXPECT: [ ] You stay signed in and your claims are still listed (the account and claims live in
+                  PostgreSQL, and your sign-in token is still valid because the backend's secret did not change).
+      OPTIONAL - the "account no longer exists" case: reset the database (see 0.2), restart the backend, then
+      reload the UI while still signed in as Alice. EXPECT: [ ] You are sent back to the sign-in page (the account
+      is gone, the backend answers 401 and the UI signs you out). Expected, not a bug; re-register Alice/Bob.
 
 
 ==================================================================================================
@@ -480,12 +485,12 @@
  Browser console shows a CORS error                You opened the UI on a different address/port.
                                                    Use http://localhost:4200 started with "npm start"
                                                    (the proxy is what makes CORS unnecessary).
- "An account with this email already exists"       The backend has not been restarted since your last
-                                                   run. Restart it for a clean database.
- Numbers on the dashboard are higher than expected Leftover data from a previous run. Restart backend.
+ "An account with this email already exists"       The database still holds your last
+                                                   run. Reset it for a clean start (see 0.2).
+ Numbers on the dashboard are higher than expected Leftover data from a previous run. Reset the database.
  Page title/tab shows "Claims" but page is blank   Check the browser console and the "npm start" terminal
                                                    for build errors.
- Signed out unexpectedly                           Backend restarted (see 11.4) or the token expired
+ Signed out unexpectedly                           Database was reset (see 11.4) or the token expired
                                                    (valid for 24 hours).
 
 

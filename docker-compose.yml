@@ -1,8 +1,29 @@
-# Claims Platform: Kafka + backend + frontend.   Start with:  docker compose up --build -d
+# Claims Platform: PostgreSQL + Kafka + backend + frontend.   Start with:  docker compose up --build -d
 # Full instructions: DOCKER.md
 name: chubb-claims
 
 services:
+  # The application database. Data lives in the named volume below, so it SURVIVES restarts and `docker compose down`;
+  # only `docker compose down -v` erases it. If you already run another Postgres on port 5432, start this stack with
+  # a different host port:  POSTGRES_PORT=5433 docker compose up -d   (containers still talk to each other on 5432).
+  postgres:
+    image: postgres:16-alpine
+    container_name: claims-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: claimsdb
+      POSTGRES_USER: claims
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}   # local-development default; set DB_PASSWORD for anything shared
+    volumes:
+      - claims-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claims -d claimsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   # Single-node Kafka in KRaft mode (no ZooKeeper). Two listeners:
   #   kafka:9092      for containers on this compose network (the backend)
   #   localhost:9094  for tools on your own machine
@@ -54,6 +75,8 @@ services:
       context: ./backend
     container_name: claims-backend
     depends_on:
+      postgres:
+        condition: service_healthy
       kafka:
         condition: service_healthy
       kafka-init:
@@ -61,6 +84,9 @@ services:
     ports:
       - "8080:8080"
     environment:
+      DB_URL: jdbc:postgresql://postgres:5432/claimsdb
+      DB_USERNAME: claims
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
       # "kafka" publishes outbox events to the broker above. Run  EVENTS_PUBLISHER=log docker compose up  to skip Kafka.
       EVENTS_PUBLISHER: ${EVENTS_PUBLISHER:-kafka}
       EVENTS_TOPIC: claims.claim-status-changed
@@ -85,3 +111,6 @@ services:
         condition: service_healthy
     ports:
       - "4200:80"
+
+volumes:
+  claims-pgdata:

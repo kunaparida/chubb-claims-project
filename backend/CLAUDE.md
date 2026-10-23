@@ -27,7 +27,7 @@ This repository is intended to demonstrate clean architecture, business-rule enf
 - Spring Security
 - JWT Authentication (jjwt 0.12)
 - PostgreSQL
-- H2 (development)
+- H2 (tests only, in PostgreSQL compatibility mode: `src/test/resources/config/application.properties`)
 - MapStruct
 - Lombok
 - OpenAPI / Swagger
@@ -215,15 +215,18 @@ If a breaking API change is required:
 
 ## Database Guidelines
 
-Development:
+Runtime (development and production):
 
-- H2
-- ddl-auto=update
+- PostgreSQL (`docker compose up -d postgres` from the repository root; settings `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`)
+- ddl-auto=update (acceptable for development only)
+
+Tests:
+
+- H2 in-memory in PostgreSQL mode, so `mvn test` needs no server. Do not add H2 back to the runtime scope.
 
 Production recommendations:
 
-- PostgreSQL
-- Flyway or Liquibase migrations
+- Flyway or Liquibase migrations instead of `ddl-auto=update`
 
 Do not introduce database-specific features unless requested.
 
@@ -247,7 +250,7 @@ item and either change the code to match this file or change this file to match 
 | This file says | What the repository actually has |
 |---|---|
 | Spring Boot 3.3 | Spring Boot **3.4.5** (`pom.xml` parent) |
-| Lombok, MapStruct, JaCoCo, PostgreSQL in the stack | **Not in `pom.xml`.** Mapping is a manual static `ClaimMapper`; getters/constructors are hand-written; no coverage plugin; no PostgreSQL driver (a commented example exists in `application.properties`). |
+| Lombok, MapStruct, JaCoCo in the stack | **Not in `pom.xml`.** Mapping is a manual static `ClaimMapper`; getters/constructors are hand-written; no coverage plugin. (PostgreSQL *is* in the stack as of 2026-10-23: runtime driver in `pom.xml`, datasource in `application.properties`.) |
 | Use MapStruct for mapping | The existing mapper is manual (`ClaimMapper.toResponse`). Follow it; do not add MapStruct unless asked. |
 | Role names are `ROLE_CLAIMANT` etc. | Enum values are `CLAIMANT`, `OFFICER`, `MANAGER`; authorisation uses `hasRole('CLAIMANT')`. Spring adds the `ROLE_` prefix. |
 | Rules live in `ClaimStatus.allowedTransitions()` | `ClaimStatus` is a plain enum. The transition table is the `TRANSITIONS` map in **`ClaimService`**. |

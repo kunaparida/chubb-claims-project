@@ -30,4 +30,6 @@ One repository, two applications, one set of documents:
 5. **Commit only when asked.** Small, conventional commits (`feat(api): …`, `feat(ui): …`, `test: …`, `docs: …`), one concern each.
 6. **Ask before installing or downloading anything. Never commit tokens, passwords or build output** (`target/`, `dist/`,
    `node_modules/`, `.build-cache/` are ignored by the root `.gitignore`).
-7. The in-memory database resets on every backend restart; restart before running `docs/E2E-VALIDATION-FLOW.txt`.
+7. The database is PostgreSQL and **keeps its data** between runs; reset it (`DOCKER.md` part 6) before running `docs/E2E-VALIDATION-FLOW.txt`.
+   Backend tests use in-memory H2 in PostgreSQL mode (`backend/src/test/resources/config`), so `mvn test` needs no database.
+   Connection settings are `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` (defaults: `localhost:5432/claimsdb`, `claims`, `change-me`, local use only).

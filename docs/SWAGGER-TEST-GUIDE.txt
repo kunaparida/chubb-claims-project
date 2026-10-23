@@ -3,16 +3,16 @@
 =====================================================================
 Swagger UI : http://localhost:8080/swagger-ui.html
 OpenAPI    : http://localhost:8080/v3/api-docs
-H2 console : http://localhost:8080/h2-console
-             JDBC URL jdbc:h2:mem:claimsdb | user sa | password (empty)
+Database   : PostgreSQL localhost:5432, database claimsdb, user claims
+             docker compose exec postgres psql -U claims -d claimsdb
 
 How to use this guide
   - Run the steps in order. Each step has: ENDPOINT, WHO (token to
     use), PAYLOAD, EXPECTED result and SAY (what to explain).
-  - Start from a FRESHLY STARTED app so the first claim gets id 1 and
+  - Start from an EMPTY database (DOCKER.md part 6) so the first claim gets id 1 and
     the second gets id 2 (the guide uses these ids). If you do not
     start fresh, use the ids returned in your own responses.
-  - H2 is in memory: data is lost on every restart.
+  - PostgreSQL keeps data between restarts: reset it for a clean run.
   - Use today's date (or earlier) for incidentDate. This guide uses
     2026-10-14. A future date is rejected.
 
@@ -350,8 +350,8 @@ STEP 30 Role checks (negative tests)
 =====================================================================
 
 STEP 31 Database
-  Open http://localhost:8080/h2-console and connect
-  (jdbc:h2:mem:claimsdb, sa, empty password). Run:
+  Open a SQL prompt on the database:
+  docker compose exec postgres psql -U claims -d claimsdb   and run:
     SELECT * FROM users;
     SELECT * FROM claims;
     SELECT * FROM claim_status_history ORDER BY id;
@@ -363,8 +363,8 @@ STEP 31 Database
 STEP 32 Events
   Look at the application console. About every 5 seconds you will see
   lines like:  EVENT topic=claims.claim-status-changed key=1 payload=...
-  Then run in H2:  SELECT id, publishedAt FROM outbox_events;
-  publishedAt is now filled in.
+  Then run in psql:  SELECT id, published_at FROM outbox_events;
+  published_at is now filled in.
   DESC: "By default events go to the log so the app runs without a
        broker. Setting app.events.publisher=kafka and
        spring.kafka.bootstrap-servers publishes to Kafka instead. I
@@ -405,7 +405,7 @@ STEP 32 Events
    401 on any call   -> not authorized, token expired, or "Bearer "
                         was pasted with the token.
    403               -> the logged-in role is not allowed.
-   404 on /h2-console login page -> app not running.
+   Backend fails at start-up with "Connection refused" -> PostgreSQL is not running (README step 1).
    409 on a status call -> the claim is not in the right status; read
                         "detail" in the response.
    400 on create     -> read the "errors" map; check claimantEmail

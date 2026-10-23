@@ -17,7 +17,7 @@ and what was **not**.
 > **How to read the Decision line.** `Decision` is the *author's* call. Where the author has not yet reviewed an entry it says
 > `Pending author review`; it is deliberately not pre-filled. Facts the AI found or got wrong are recorded under *Result* and
 > *Corrections*, not disguised as the author's decisions. The backend entries (Phases 1 to 3) keep the decisions recorded in the
-> original backend journal; the frontend entries F1 to F6 are still pending.
+> original backend journal; the frontend entries F1 to F7 are still pending.
 
 ## 1. Conventions
 
@@ -28,7 +28,7 @@ and what was **not**.
 | **OVERRODE** | The author decided differently from the AI. |
 
 Prompts appear in the order they were sent. Backend entries (Part A) follow the structure *Prompt, Result, Decision, Verification*;
-frontend entries (Part C) add a *Corrections* section and put *Decision* last. Frontend prompts are numbered **F1 to F6** so they
+frontend entries (Part C) add a *Corrections* section and put *Decision* last. Frontend prompts are numbered **F1 to F7** so they
 do not collide with the backend's Prompts 1 to 23.
 
 ## 2. Summary of the work
@@ -41,6 +41,7 @@ do not collide with the backend's Prompts 1 to 23.
 | 4. Frontend integration | F1-F3 | `C:\project\claim_management_UI` (now `frontend/`) | `CLAUDE.md` and journal first, then all 19 endpoints integrated into one Angular app for three roles, then a manual end-to-end script. |
 | 5. Submission packaging | F4-F5 | repository root | One repository with one README, one ARCHITECTURE and this one journal. |
 | 6. Containerisation | F6 | repository root, `backend/`, `frontend/` | Dockerfiles, a compose file with Kafka, a Kafka configuration check, and `DOCKER.md`. |
+| 7. Database change | F7 | `backend/`, root, `docs/` | H2 replaced by PostgreSQL as the runtime database (tests keep H2 in PostgreSQL mode); compose and all documents updated. |
 
 ## 3. Key outcomes
 
@@ -155,6 +156,8 @@ was removed and the README updated.
 
 **Verification:** application starts with no external database.
 
+*Superseded by F7 (Part C): PostgreSQL is now the runtime database and H2 is used by the tests only.*
+
 ### Prompt 4: Compile error
 
 **Prompt**
@@ -244,7 +247,7 @@ Buddy version managed by Spring Boot 3.4.5 does not support JDK 27. It added `by
 These entries were written in the frontend repository before the two repositories were combined. What changed when they were
 carried over (F5 explains why):
 
-* Numbered **F1 to F6** instead of Prompt 1 to 3, so they do not collide with the backend prompts.
+* Numbered **F1 to F7** instead of Prompt 1 to 3, so they do not collide with the backend prompts.
 * Absolute paths inside the entries are the **original** ones and are left as history: `C:\project\claim_management_UI` is now
   `frontend/`, and `C:\project\chubb-claims-backendService` is now `backend/`.
 * **F1:** the closing code fence after the prompt text was missing in the committed journal, so the rest of the entry rendered as
@@ -603,6 +606,65 @@ you dockerize it and check kafka configuration and also create an md file where 
 
 ---
 
+## F7: Convert the database from H2 to PostgreSQL and update every related file
+
+**Prompt** (verbatim), plus a message the author sent while the work was running
+```text
+convert now db h2 to postgress and change related thing in all files
+```
+```text
+btw I have potgressql in docker
+```
+
+**Result** (in the author's working copy `C:\project\chubb-claims-project`; nothing committed)
+
+* `backend/pom.xml`: the PostgreSQL driver is a runtime dependency; H2 moved to **test** scope.
+* `backend/src/main/resources/application.properties`: datasource now `${DB_URL}`, `${DB_USERNAME}`, `${DB_PASSWORD}` with local defaults
+  (`jdbc:postgresql://localhost:5432/claimsdb`, `claims`, `change-me`); the H2 console settings and the commented PostgreSQL example are gone.
+  `ddl-auto=update` was kept.
+* `SecurityConfig`: removed the `/h2-console/**` permit rule and the `X-Frame-Options: sameOrigin` header setting, which existed only so the
+  H2 console could be shown in a frame (the Spring Security default, deny, applies again).
+* `backend/src/test/resources/config/application.properties` (new): the tests keep running on in-memory H2 but in **PostgreSQL compatibility
+  mode**, so `mvn test` needs no server. It sits in `config/` so Spring Boot layers it over the main file instead of replacing it.
+* `docker-compose.yml`: a `postgres` service (16-alpine, health check, data in the named volume `claims-pgdata`, host port from
+  `POSTGRES_PORT`, default 5432); the backend gets `DB_*` variables and waits for the database.
+* Documents updated: `README.md`, `ARCHITECTURE.md`, `DOCKER.md` (database steps, reset commands, using a PostgreSQL you already have,
+  native install, troubleshooting), the three `CLAUDE.md` files, `docs/SWAGGER-TEST-GUIDE.txt`, `docs/E2E-VALIDATION-FLOW.txt`.
+
+**What changes for the author (behaviour, not just wording)**
+
+* **Data now persists.** Every restart used to start clean; now accounts and claims survive restarts. The E2E and Swagger guides assumed a clean
+  start, so they now say to reset the database first, and E2E step 11.4 ("backend restarted = data gone") was rewritten.
+* **The backend needs a running PostgreSQL to start.** Running it from the IDE without one fails with "Connection refused".
+
+**Corrections**
+
+* The author said they already have PostgreSQL in Docker. The AI could not see it: from its shell there is no `docker` command, no WSL, and
+  nothing listening on 5432, so the container's name, port, database and credentials are unknown to it. The defaults above are a guess at a
+  convention, not knowledge of the author's setup; `DOCKER.md` part 9 gives the commands to create the user and database in an existing
+  container, or the environment variables to point the backend at it.
+* The Swagger guide's SQL used `publishedAt`; the real column is `published_at` (Spring's naming strategy), so that query would have failed on
+  any database. Fixed in the guide and used correctly in the new text.
+* The first attempt at previewing the generated schema used a Hibernate class that does not exist in this version and did not compile; it was
+  replaced by a throwaway test in a scratch copy (not in the project).
+* A host-port clash is possible: the compose `postgres` service also wants 5432, which the author's own container may hold. `POSTGRES_PORT` was
+  added for that, and the docs say so.
+
+**Verification**
+
+* Done, in a scratch copy of `backend/` (the project's own `target/` was not touched): `mvn -o test` passed, **82 project tests, 0 failures**
+  (plus one throwaway test that exists only in the scratch copy). The same run wrote the DDL Hibernate generates for the **PostgreSQL dialect**,
+  which was read: identity primary keys, `timestamp with time zone`, `numeric(14,2)` for amounts, enum check constraints, the two explicit
+  indexes on `claim_status_history.claim_id` and `outbox_events.published_at`, the unique constraints, and no reserved-word column names. The
+  repository code was read for vendor-specific SQL: every query is JPQL, with no native queries.
+* **Not verified, and important:** nothing has ever connected to a real PostgreSQL server. The backend was not started against PostgreSQL, the
+  compose file was not run, and the E2E script was not re-run (its numbers come from the earlier in-memory run and should not depend on the
+  database engine). H2 in PostgreSQL mode approximates PostgreSQL; it is not PostgreSQL. `DOCKER.md` part 5 is the way to settle it.
+
+**Decision:** `Pending author review`
+
+---
+
 # Part D: Open Questions for the Backend
 
 The frontend does not change the backend. These are things the author may want to change there (or accept as limitations and explain in the walkthrough).
@@ -625,7 +687,7 @@ Backend:
 |---|---|
 | Concurrency | No optimistic locking (`@Version`). |
 | Messaging | No test against a real Kafka broker. |
-| Database | `ddl-auto=update` and in-memory H2 by default; no migration tooling. |
+| Database | PostgreSQL since F7 (originally in-memory H2); `ddl-auto=update`, no migration tooling; not yet run against a real PostgreSQL server. |
 | Secrets | Default JWT secret is for local use only. |
 | Quality metrics | Code coverage is not measured in this repository (no JaCoCo plugin). |
 
@@ -650,14 +712,17 @@ not filled them in because it would have to invent them.**
 3. **Missing entries.** Prompts 6-23 and design sections B2-B5 are not yet written up in this journal.
 4. **F1 prompt text.** Confirm that the edited block is what you want to show, or replace it with the message that was actually
    sent, or relabel it "cleaned-up prompt" (see the note under F1).
-5. **Decisions for F1 to F6** are all `Pending author review`. Choose ACCEPTED, CHALLENGED or OVERRODE for each, with your reason.
+5. **Decisions for F1 to F7** are all `Pending author review`. Choose ACCEPTED, CHALLENGED or OVERRODE for each, with your reason.
 6. **F3 was reconstructed.** Read it and correct anything that does not match what you remember of that session.
 7. **Backend commit hashes.** The backend history in this repository has the same commits, messages, authors and dates as the
    original, but different hashes, because the committed `.build-cache/` was removed from every commit (see F5). If anyone asks, that
    is why `git log` here does not match the original repository.
-8. **Docker run (F6).** Install Docker, follow `DOCKER.md`, and write what happened (including any fix needed) into F6. Decide whether to
+8. **PostgreSQL run (F7).** Start the stack (or your own PostgreSQL with the user and database created), start the backend, and confirm the four tables
+   appear and the E2E script passes. The setup has never touched a real PostgreSQL server; record the outcome in F7. Also decide whether to keep
+   `ddl-auto=update` or add Flyway.
+9. **Docker run (F6).** Install Docker, follow `DOCKER.md`, and write what happened (including any fix needed) into F6. Decide whether to
    add `max.block.ms` to the backend's Kafka producer settings.
-9. **Fresh-clone check.** Clone the repository somewhere clean, run `npm install` in `frontend/`, and follow `README.md` once; F5 records
+10. **Fresh-clone check.** Clone the repository somewhere clean, run `npm install` in `frontend/`, and follow `README.md` once; F5 records
    what was and was not run.
 
 ---

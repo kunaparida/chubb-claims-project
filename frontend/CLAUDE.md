@@ -15,7 +15,7 @@ The **backend is finished and is the owner of the API contract.** This folder on
 | | |
 |---|---|
 | Backend | `../backend` in this repository (Spring Boot 3.4.5, Java 21, Maven) — **do not edit it as part of UI work** |
-| Backend URL (local) | `http://localhost:8080` (`mvn spring-boot:run` in `backend/`; H2 in-memory, resets on restart) |
+| Backend URL (local) | `http://localhost:8080` (`mvn spring-boot:run` in `backend/`; PostgreSQL must be running; data persists across restarts) |
 | Swagger UI | `http://localhost:8080/swagger-ui/index.html` (OpenAPI JSON: `/v3/api-docs`) |
 | Backend docs | the root `README.md` and `ARCHITECTURE.md` (part B), `../docs/SWAGGER-TEST-GUIDE.txt`, `../backend/postman/Claims-Management.postman_collection.json` |
 

@@ -26,7 +26,7 @@ contract, the HTTP API.
  Dev proxy (frontend/proxy.conf.json:  /api → http://localhost:8080)
    │
    ▼
- Spring Boot service :8080 ──► H2 in-memory database (PostgreSQL config provided)
+ Spring Boot service :8080 ──► PostgreSQL 16 (database claimsdb, data in a Docker volume)
    │                           outbox_events ─► scheduled relay ─► log (default) or Kafka
    └─ Swagger UI / OpenAPI at /swagger-ui/index.html, /v3/api-docs
 ```
@@ -34,7 +34,7 @@ contract, the HTTP API.
 | | Backend | Frontend |
 |---|---|---|
 | Folder | `backend/` | `frontend/` |
-| Stack | Java 21, Spring Boot 3.4.5, Spring Security + JWT, Spring Data JPA, H2, optional Kafka | Angular 22 (zoneless, signals, standalone components), RxJS, Vitest |
+| Stack | Java 21, Spring Boot 3.4.5, Spring Security + JWT, Spring Data JPA, PostgreSQL, optional Kafka | Angular 22 (zoneless, signals, standalone components), RxJS, Vitest |
 | Owns | The API contract, every business rule, access control, audit history, events | Presentation, navigation, and a convenience copy of the "who can do what" rules |
 | Authority | **Final.** Every rule is enforced here | **None.** Guards and hidden buttons only steer; the server answers 403/404/409 regardless |
 
@@ -72,7 +72,7 @@ the shell shows role-specific navigation and each page is behind a role guard.
                           │ repository  (Spring Data JPA, aggregate queries)       │
                           └───────────────────────────┬───────────────────────────┘
                                                       ▼
-                          H2 (default)  /  PostgreSQL (config provided)
+                          PostgreSQL 16   (tests use H2 in PostgreSQL mode)
                           tables: users, claims, claim_status_history, outbox_events
                                                       │
                   OutboxPublisher (scheduled) ────────┘──► EventPublisher
@@ -161,9 +161,12 @@ Event contract (`claims.claim-status-changed`, JSON):
 - **Writes** are low volume, transactional, per claim. **Reads** are dominated by lists and dashboards.
 - Officers need: *what is waiting* (`GET /api/claims/queue`: unassigned `SUBMITTED`, oldest first), *what is mine*
   (`GET /api/claims`, optional `?status=`), and *what happened* (`GET /api/claims/{id}/history`).
-- Indexes: explicit indexes exist on `claim_status_history.claim_id` and `outbox_events.publishedAt`. H2 indexes foreign
-  keys automatically; **on PostgreSQL I would add explicit indexes** on `claims(claimant_id)`, `claims(assigned_officer_id)`
-  and `claims(status)`, because the list, queue and dashboard queries filter on them.
+- Indexes: explicit indexes exist on `claim_status_history.claim_id` and `outbox_events.published_at`. **PostgreSQL does not
+  index foreign-key columns automatically, so I would add explicit indexes** on `claims(claimant_id)`,
+  `claims(assigned_officer_id)` and `claims(status)`, because the list, queue and dashboard queries filter on them.
+- Database: PostgreSQL, schema created by Hibernate (`ddl-auto=update`; identity ids, `timestamptz`, `numeric(14,2)` for
+  amounts). Connection settings come from `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`. All queries are JPQL, so nothing is tied to a
+  vendor; there are no native queries.
 - Managers: workload (counts per status, unassigned), liability (pending exposure and approved-not-settled, **broken down
   by claim type and market**) and officer performance, all computed by the database.
 
@@ -194,7 +197,8 @@ RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map f
 ### B.7 Testing strategy
 - Unit tests with Mockito for services, the audit recorder, the outbox relay and the publishers.
 - Validation tests for request rules (policy, amount, future date, description length, claim type, market).
-- Two Spring Boot integration tests on H2: the original role/workflow flow and the lifecycle extensions (queue, pick-up,
+- Two Spring Boot integration tests on in-memory H2 in PostgreSQL compatibility mode (no server needed, configured in
+  `src/test/resources/config/application.properties`; not a substitute for running against real PostgreSQL): the original role/workflow flow and the lifecycle extensions (queue, pick-up,
   claimant answer, history, filter, outbox, liability breakdown).
 - Wiring tests prove the publisher is chosen by configuration.
 - Postman collection (`backend/postman/`) replays the same flow, with assertions, in collection order.
@@ -354,7 +358,7 @@ be found." (404). After a failed action the claim is reloaded so the screen show
 | Kafka path wired and unit-tested but **not run against a real broker** (a Docker Compose with Kafka now exists, `DOCKER.md`, but has not been run) | Run it; add an integration test (Testcontainers) |
 | With the broker down, `KafkaTemplate.send` can block up to Kafka's default `max.block.ms` (60 s) before the 10 s acknowledgement timeout applies, holding the relay thread and its transaction | `spring.kafka.producer.properties.max.block.ms=10000` |
 | Outbox poller runs in every instance, so duplicates are possible with several instances | Row locking (`FOR UPDATE SKIP LOCKED`) or a dedicated relay |
-| `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL, real user provisioning |
+| `ddl-auto=update` creates and alters tables at start-up; bootstrap users with a known password; the PostgreSQL setup has **not yet run against a real server** (the generated schema was inspected, the tests run on H2 in PostgreSQL mode) | Flyway migrations, real user provisioning, run the stack once and record the result (`DOCKER.md`) |
 | `assignedOfficer` can be re-assigned without a history entry; rejected and settled claims can still be reassigned | Record assignment events; refuse assignment of terminal claims |
 | Performance dashboard counts only; no time-to-decision | Use `claim_status_history` timestamps |
 | No claimant notifications | Consumer of `ClaimStatusChanged` (the seam exists) |
