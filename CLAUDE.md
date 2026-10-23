@@ -14,6 +14,7 @@ One repository, two applications, one set of documents:
 | `ARCHITECTURE.md` | Backend (part B), frontend (part C), integration (part D), limitations (part E) | update it when a design decision changes |
 | `AI_JOURNAL.md` | How AI was used: backend Parts A–B, frontend Part C (F-numbers), open questions Part D, limitations E, open items F | see below |
 | `docs/` | `E2E-VALIDATION-FLOW.txt` (manual test script), `SWAGGER-TEST-GUIDE.txt` | keep the numbers in the E2E script true when behaviour changes |
+| `docker-compose.yml`, `DOCKER.md`, `*/Dockerfile`, `frontend/nginx.conf` | Containers: Kafka + backend + frontend | keep `DOCKER.md` and the compose file in step; the topic name appears in compose twice and must match `EVENTS_TOPIC` |
 
 ## Rules that apply to everything
 

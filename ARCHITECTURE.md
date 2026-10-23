@@ -42,6 +42,12 @@ contract, the HTTP API.
 them. Where the backend lacks something the UI would like (CORS, an officers endpoint, "allowed actions", a currency), the UI works
 around it and the gap is written down in [part D](#part-d-integration-decisions) and [part E](#part-e-known-limitations-and-next-steps).
 
+**Containers.** `docker-compose.yml` runs three long-lived containers and one setup job: Kafka (single node, KRaft), the backend
+(`EVENTS_PUBLISHER=kafka`), the frontend (nginx), and `kafka-init`, which creates the topic. In this layout nginx plays the role of
+the dev proxy: the browser only talks to port 4200 and nginx forwards `/api/` to the backend, so the backend's missing CORS
+configuration still does not matter (see D.2). Details and the Kafka configuration check are in [DOCKER.md](DOCKER.md); the Docker files
+have not been run yet.
+
 **One app, three roles.** The brief asks for both user types to use the same Angular application. The JWT carries the role;
 the shell shows role-specific navigation and each page is behind a role guard.
 
@@ -345,7 +351,8 @@ be found." (404). After a failed action the claim is reloaded so the screen show
 | Limitation | Next step |
 |---|---|
 | No optimistic locking: two officers acting at the same instant could race | Add `@Version` to `Claim`, map the conflict to 409 |
-| Kafka path wired and unit-tested but **not run against a real broker** | Docker Compose with Kafka + an integration test (Testcontainers) |
+| Kafka path wired and unit-tested but **not run against a real broker** (a Docker Compose with Kafka now exists, `DOCKER.md`, but has not been run) | Run it; add an integration test (Testcontainers) |
+| With the broker down, `KafkaTemplate.send` can block up to Kafka's default `max.block.ms` (60 s) before the 10 s acknowledgement timeout applies, holding the relay thread and its transaction | `spring.kafka.producer.properties.max.block.ms=10000` |
 | Outbox poller runs in every instance, so duplicates are possible with several instances | Row locking (`FOR UPDATE SKIP LOCKED`) or a dedicated relay |
 | `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL, real user provisioning |
 | `assignedOfficer` can be re-assigned without a history entry; rejected and settled claims can still be reassigned | Record assignment events; refuse assignment of terminal claims |
