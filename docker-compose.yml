@@ -60,12 +60,18 @@ services:
         condition: service_completed_successfully
     ports:
       - "8080:8080"
+
+    restart: unless-stopped
     environment:
       # "kafka" publishes outbox events to the broker above. Run  EVENTS_PUBLISHER=log docker compose up  to skip Kafka.
       EVENTS_PUBLISHER: ${EVENTS_PUBLISHER:-kafka}
       EVENTS_TOPIC: claims.claim-status-changed
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       OUTBOX_POLL_MS: "5000"
+
+      SPRING_H2_CONSOLE_ENABLED: "true"
+      SPRING_H2_CONSOLE_SETTINGS_WEB_ALLOW_OTHERS: "true"
+
       # Optional overrides (defaults come from application.properties and are for local use only):
       #   JWT_SECRET: <Base64 secret, at least 32 bytes>
       #   BOOTSTRAP_PASSWORD: <password for the seeded officer and manager accounts>
