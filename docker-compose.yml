@@ -69,8 +69,9 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       OUTBOX_POLL_MS: "5000"
 
-      SPRING_H2_CONSOLE_ENABLED: "true"
-      SPRING_H2_CONSOLE_SETTINGS_WEB_ALLOW_OTHERS: "true"
+      # H2 console: off unless you start the stack with H2_CONSOLE_ENABLED=true (see DOCKER.md part 5.5). It needs no sign-in.
+      H2_CONSOLE_ENABLED: ${H2_CONSOLE_ENABLED:-false}
+      H2_CONSOLE_ALLOW_OTHERS: ${H2_CONSOLE_ENABLED:-false}
 
       # Optional overrides (defaults come from application.properties and are for local use only):
       #   JWT_SECRET: <Base64 secret, at least 32 bytes>

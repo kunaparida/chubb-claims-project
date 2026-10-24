@@ -9,11 +9,11 @@ A full-stack claims management application built with **Java, Spring Boot, and A
 [![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-brightgreen?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Angular](https://img.shields.io/badge/Angular-22-DD0031?logo=angular&logoColor=white)](https://angular.dev/)
-[![Database](https://img.shields.io/badge/Database-H2%20%7C%20PostgreSQL-blue)](https://www.postgresql.org/)
+[![Database](https://img.shields.io/badge/Database-H2%20in--memory-blue)](https://www.h2database.com/)
 [![Events](https://img.shields.io/badge/Events-Kafka-231F20?logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
 [![Containers](https://img.shields.io/badge/Containers-Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 
-[Quick Start](#run-it-locally) · [Build & Test](#tests) · [API Guide](#the-api-at-a-glance) · [Architecture](ARCHITECTURE.md) · [AI Journal](AI_JOURNAL.md) · [Docker Guide](DOCKER.md)
+[Quick Start](#quick-start--run-it-locally) · [Build & Test](#build-and-test) · [API Guide](#api-overview) · [Architecture](ARCHITECTURE.md) · [AI Journal](AI_JOURNAL.md) · [Docker Guide](DOCKER.md)
 
 </div>
 
@@ -35,12 +35,12 @@ A small full-stack claims platform that replaces scattered claim tracking with *
 |---|---|
 | Backend | Java 21, Spring Boot 3.4, Spring MVC, Spring Security with JWT, Spring Data JPA, Bean Validation |
 | Frontend | Angular 22, standalone components, signals, zoneless change detection |
-| Persistence | H2 for local assessment runs; PostgreSQL is a deployment target to validate |
+| Persistence | In-memory H2 (the only database in use; data resets on restart). PostgreSQL is only a commented datasource example: no driver is included |
 | Events | Transactional outbox with log publisher by default and optional Kafka publisher |
-| API documentation | OpenAPI / Swagger UI |
+| API documentation | OpenAPI / Swagger UI: every endpoint has a summary and documented error responses, and the request bodies carry examples |
 | Packaging | Docker Compose configuration (execution still needs environment validation) |
 
-> **Verification note:** Test counts and build results below are recorded in the project development documentation; they were not rerun as part of this README redesign. Docker Compose and publishing to a real Kafka broker remain unverified in the available evidence.
+> **Verification note:** Backend tests and coverage were re-run on 2026-10-24 (85 tests passing; JaCoCo 97.0% line coverage, JDK 21). The 216 frontend tests were last re-run on 2026-10-23. Docker Compose and publishing to a real Kafka broker remain unverified in the available evidence.
 
 ## Repository layout
 
@@ -93,7 +93,7 @@ environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=fa
 |---|---|
 | `http://localhost:4200` | the application |
 | `http://localhost:8080/swagger-ui/index.html` | API documentation (OpenAPI JSON at `/v3/api-docs`) |
-| `http://localhost:8080/h2-console` | database console, enabled for local development: JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`, empty password. **It needs no sign-in, so switch it off (`spring.h2.console.enabled=false`) anywhere shared** |
+| `http://localhost:8080/h2-console` | database console, **off by default**. Start the backend with `H2_CONSOLE_ENABLED=true` to use it: JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`, empty password. It needs no sign-in, so never enable it anywhere shared |
 
 > **Why the frontend talks to the backend through a proxy.** The backend has no CORS configuration, so a browser on port 4200
 > cannot call port 8080 directly (the browser blocks the cross-origin call). `npm start` proxies `/api` to the backend
@@ -110,7 +110,7 @@ docker compose up --build -d
 ```
 
 Then open <http://localhost:4200>. **[DOCKER.md](DOCKER.md)** has the full steps: installing WSL 2 and Docker Desktop, checking the install,
-watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. The stack is intended to run the backend (in-memory H2 database), the frontend behind nginx, and a single-node Kafka broker. The H2 console is enabled in the documented configuration and must not be exposed in a shared or production environment. See `DOCKER.md` for setup and verification steps.
+watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. The stack is intended to run the backend (in-memory H2 database), the frontend behind nginx, and a single-node Kafka broker. The H2 console is off unless you start the stack with `H2_CONSOLE_ENABLED=true`; it needs no sign-in and must not be exposed in a shared or production environment. See `DOCKER.md` for setup and verification steps.
 
 ## Validate the application end to end
 
@@ -129,7 +129,7 @@ All endpoints except register and login need `Authorization: Bearer <token>`. Er
 | `POST /api/auth/register` | public | Create a claimant account; returns a JWT |
 | `POST /api/auth/login` | public | Sign in (any role); returns a JWT |
 | `GET /api/auth/me` | any | The signed-in user's profile |
-| `POST /api/claims` | CLAIMANT | Submit a claim |
+| `POST /api/claims` | CLAIMANT | Submit a claim; `201` with a `Location` header pointing at the new claim |
 | `GET /api/claims?status=&page=&size=` | any | Own claims (claimant), assigned claims (officer), all claims (manager) |
 | `GET /api/claims/queue` | OFFICER, MANAGER | Unassigned `SUBMITTED` claims, oldest first |
 | `GET /api/claims/{id}` | any | One claim (claimants only their own; officers their own or unassigned) |
@@ -181,13 +181,15 @@ The Kafka publisher is wired and unit-tested but has **not** been run against a 
 ## Build and test
 
 ```bash
-cd backend  && mvn test                         # unit + Spring Boot integration tests (H2)
+cd backend  && mvn test                         # 85 unit + Spring Boot integration tests (H2) and the JaCoCo coverage report
 cd frontend && npm test -- --no-watch           # Vitest: 216 unit/component tests
 cd frontend && npm run build                    # strict production build
 ```
 
-Backend tests cover the service rules, the audit recorder, the outbox relay and publishers, validation, and two end-to-end
-Spring Boot tests (82 tests). Frontend tests cover the API contract (every verb, path and body),
+Backend tests cover the service rules, the audit recorder, the outbox relay and publishers, validation, the API contract (the `Location`
+header, the H2 console being closed by default, every endpoint documented) and the end-to-end Spring Boot flows (85 tests).
+`mvn test` also writes the coverage report to `backend/target/site/jacoco/index.html`; measured on 2026-10-24 (JDK 21, JaCoCo 0.8.15):
+**97.0% of lines, 85.7% of branches**. Frontend tests cover the API contract (every verb, path and body),
 the interceptor and guards, an exhaustive check of the UI's "who can do what" table against the backend workflow, and each screen.
 
 ## Project documentation
@@ -203,4 +205,4 @@ the interceptor and guards, an exhaustive check of the UI's "who can do what" ta
 
 ## Known limitations and deployment considerations
 
-The current implementation is a development/assessment baseline, not a production deployment configuration. Review [ARCHITECTURE.md](ARCHITECTURE.md), Part E, before deploying. Key considerations are: in-memory H2 data is lost on restart; the H2 console is enabled and unauthenticated in the documented configuration; the backend has no CORS configuration and relies on a proxy or same-origin gateway; claim amounts have no currency; optimistic locking is not implemented; and Docker/Kafka execution has not been confirmed in the recorded verification evidence.
+The current implementation is a development/assessment baseline, not a production deployment configuration. Review [ARCHITECTURE.md](ARCHITECTURE.md), Part E, before deploying. Key considerations are: in-memory H2 data is lost on restart; the H2 console is opt-in (off by default) and unauthenticated when enabled; the backend has no CORS configuration and relies on a proxy or same-origin gateway; claim amounts have no currency; optimistic locking is not implemented; and Docker/Kafka execution has not been confirmed in the recorded verification evidence.

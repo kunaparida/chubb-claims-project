@@ -21,7 +21,7 @@ One repository, two applications, one set of documents:
 | Task | Command (run from the folder shown) |
 |---|---|
 | Run the backend (port 8080) | `mvn spring-boot:run` in `backend/` |
-| Backend tests (82) | `mvn test` in `backend/` |
+| Backend tests (85) and coverage report | `mvn test` in `backend/` |
 | Run the UI (port 4200, proxies `/api` to 8080) | `npm install` once, then `npm start` in `frontend/` |
 | UI tests (216) and production build | `npm test -- --no-watch`, `npm run build` in `frontend/` |
 | Everything in containers (Kafka included) | `docker compose up --build -d` in the repository root, then see `DOCKER.md` |
@@ -44,5 +44,8 @@ One repository, two applications, one set of documents:
 7. **Ask before installing or downloading anything. Never commit tokens, passwords or build output** (`target/`, `dist/`,
    `node_modules/`, `.build-cache/` are ignored by the root `.gitignore`).
 8. **The database is in-memory H2.** It resets on every backend restart (restart before running `docs/E2E-VALIDATION-FLOW.txt`).
-   PostgreSQL is *not* used and has no driver in `pom.xml`; do not add one unless asked. The H2 console (`/h2-console`) is enabled and
-   needs no token: local development only, never for a shared deployment.
+   PostgreSQL is *not* used and has no driver in `pom.xml`; do not add one unless asked. The H2 console (`/h2-console`) is **off by
+   default** (`H2_CONSOLE_ENABLED=true` turns it on, and `SecurityConfig` then opens it); it needs no token, so local development only.
+9. **New or changed endpoints are documented in the same change.** Every controller method needs an `@Operation` summary and its error
+   `@ApiResponse`s, request fields need `@Schema` examples, and `ApiContractTest` (which also pins the endpoint count at 19) must be
+   updated. Creating a resource returns `201` with a `Location` header.

@@ -5,7 +5,7 @@ This guide takes you from a machine with no Docker to the whole system running: 
 | Container | What it is | Where you reach it |
 |---|---|---|
 | `frontend` | Angular app served by nginx; nginx forwards `/api/...` to the backend | **http://localhost:4200** |
-| `backend` | Spring Boot API (in-memory H2 database, H2 console on; restarted automatically unless stopped) | http://localhost:8080 · Swagger: http://localhost:8080/swagger-ui/index.html · H2 console: http://localhost:8080/h2-console |
+| `backend` | Spring Boot API (in-memory H2 database; restarted automatically unless stopped) | http://localhost:8080 · Swagger: http://localhost:8080/swagger-ui/index.html · H2 console only if enabled (5.5) |
 | `kafka` | Single-node Apache Kafka 3.9 (KRaft mode, no ZooKeeper) | `kafka:9092` inside Docker, `localhost:9094` from your machine |
 | `kafka-init` | One-shot job that creates the topic `claims.claim-status-changed`, then exits | not a server |
 
@@ -13,8 +13,8 @@ Files that make this work: `docker-compose.yml` (root), `backend/Dockerfile`, `f
 
 > **Status of these files (read this first).** They were written and reviewed against the project's code and Spring Boot / Angular / Kafka
 > conventions, but **Docker was not available to the AI that wrote them, so it never built an image or started a container.** The
-> author has since edited the compose file (a restart policy and the H2 console settings on the backend), but no run result is
-> recorded anywhere. The backend and frontend themselves were built and tested (82 and 216 tests), and the Kafka path has only ever been
+> author has since edited the compose file (a restart policy on the backend, and H2 console settings that are now off by default), but no
+> run result is recorded anywhere. The backend and frontend themselves were built and tested (85 and 216 tests), and the Kafka path has only ever been
 > unit-tested against a mocked `KafkaTemplate`. Part 5 below is how you prove it for real; if a step fails, [part 8](#8-troubleshooting)
 > and `docker compose logs` will say why, and please record the result in `AI_JOURNAL.md` (entry F5).
 
@@ -189,10 +189,16 @@ docker compose start kafka
 
 Within one to two poll intervals the consumer from 5.2 (restart it if it exited) shows the event that was waiting. Nothing was lost.
 
-**5.5 Cross-check with the database console** (optional): open http://localhost:8080/h2-console, JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`,
-empty password, then run `SELECT * FROM OUTBOX_EVENTS;`. Published rows have a publish timestamp; a row without one has not reached Kafka yet.
-The compose file turns the console on and lets other hosts reach it (`SPRING_H2_CONSOLE_ENABLED`, `SPRING_H2_CONSOLE_SETTINGS_WEB_ALLOW_OTHERS`)
-so that your browser, outside the container, can open it. It needs no sign-in: use it only on your own machine.
+**5.5 Cross-check with the database console** (optional). The H2 console is **off by default** because it needs no sign-in. Start the stack
+with it switched on (the compose file then also lets your browser, outside the container, reach it):
+
+```powershell
+$env:H2_CONSOLE_ENABLED = "true"; docker compose up -d
+```
+
+Then open http://localhost:8080/h2-console, JDBC URL `jdbc:h2:mem:claimsdb`, user `sa`, empty password, and run `SELECT * FROM OUTBOX_EVENTS;`.
+Published rows have a publish timestamp; a row without one has not reached Kafka yet. Switch it off again afterwards
+(`Remove-Item Env:H2_CONSOLE_ENABLED; docker compose up -d`) and use it only on your own machine.
 
 ## 6. Everyday commands
 

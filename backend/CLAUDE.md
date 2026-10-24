@@ -254,8 +254,10 @@ item and either change the code to match this file or change this file to match 
 | A claim must be assigned before review | Enforced for **officers** (only the assigned officer may act). **Managers** can review an unassigned claim. |
 | Rejected and settled claims cannot be reassigned | **Not enforced** in `ClaimService.assign`. |
 | Officers may access claims assigned to them | Also true for **unassigned** claims, so they can read the queue (`GET /api/claims/queue`) and pick them up. Other officers' claims return 404. |
-| Only the API is public: register, login, Swagger | `SecurityConfig` also permits **`/h2-console/**` without a token** and keeps `X-Frame-Options: sameOrigin` so the H2 console can open; `application.properties` enables the console with `web-allow-others=true`. This is for local development only. The previous filter chain is still in the file as commented-out code below the active one. |
+| Only the API is public: register, login, Swagger | The H2 console is **off by default** (`H2_CONSOLE_ENABLED`, `H2_CONSOLE_ALLOW_OTHERS` in `application.properties`). Only when it is on does `SecurityConfig` permit **`/h2-console/**` without a token** and set `X-Frame-Options: sameOrigin`; `ApiContractTest` checks it is unreachable otherwise. |
 | The whole API is reachable from any front end | **No CORS configuration.** A browser on another origin is blocked; the UI uses the Angular dev proxy (or nginx in Docker). |
+| (nothing about API documentation) | Controllers and DTOs carry OpenAPI annotations (`@Tag`, `@Operation`, `@ApiResponse`, `@Schema`). **Every endpoint needs a summary**; `ApiContractTest` fails otherwise and pins the endpoint count at 19. `POST /api/claims` returns `201` with a `Location` header. |
+| (nothing about coverage) | JaCoCo 0.8.15 runs with `mvn test` and writes `target/site/jacoco/index.html` (97.0% of lines on 2026-10-24). It is a report, not a build gate. |
 
 ## Features added after this file's rules were written
 

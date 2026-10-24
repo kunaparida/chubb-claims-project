@@ -3,7 +3,7 @@
 =====================================================================
 Swagger UI : http://localhost:8080/swagger-ui.html
 OpenAPI    : http://localhost:8080/v3/api-docs
-H2 console : http://localhost:8080/h2-console
+H2 console : http://localhost:8080/h2-console   (OFF by default: start the backend with H2_CONSOLE_ENABLED=true)
              JDBC URL jdbc:h2:mem:claimsdb | user sa | password (empty)
 
 How to use this guide
@@ -350,7 +350,7 @@ STEP 30 Role checks (negative tests)
 =====================================================================
 
 STEP 31 Database
-  Open http://localhost:8080/h2-console and connect
+  Start the backend with H2_CONSOLE_ENABLED=true, open http://localhost:8080/h2-console and connect
   (jdbc:h2:mem:claimsdb, sa, empty password). Run:
     SELECT * FROM users;
     SELECT * FROM claims;
@@ -405,7 +405,7 @@ STEP 32 Events
    401 on any call   -> not authorized, token expired, or "Bearer "
                         was pasted with the token.
    403               -> the logged-in role is not allowed.
-   404 on /h2-console login page -> app not running.
+   401 on /h2-console -> the console is off; start the backend with H2_CONSOLE_ENABLED=true.
    409 on a status call -> the claim is not in the right status; read
                         "detail" in the response.
    400 on create     -> read the "errors" map; check claimantEmail
