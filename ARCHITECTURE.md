@@ -45,13 +45,35 @@ them. Where the backend lacks something the UI would like (CORS, an officers end
 around it and the gap is written down in [part D](#part-d-integration-decisions) and [part E](#part-e-known-limitations-and-next-steps).
 
 **Container design (execution not yet verified).** `docker-compose.yml` is configured for three long-lived containers and one setup job: Kafka (single node, KRaft), the backend
-(`EVENTS_PUBLISHER=kafka`, same in-memory H2 database, H2 console enabled, `restart: unless-stopped`), the frontend (nginx), and
+(`EVENTS_PUBLISHER=kafka`, same in-memory H2 database, H2 console off unless `H2_CONSOLE_ENABLED=true`, `restart: unless-stopped`), the frontend (nginx), and
 `kafka-init`, which creates the topic. In this layout nginx plays the role of the dev proxy: the browser only talks to port 4200 and nginx
 forwards `/api/` to the backend, so the backend's missing CORS configuration still does not matter (see D.2). Details and the Kafka
 configuration check are in [DOCKER.md](DOCKER.md). The available development record does not include a successful image build or container run (see `AI_JOURNAL.md`).
 
 **One app, three roles.** The brief asks for both user types to use the same Angular application. The JWT carries the role;
 the shell shows role-specific navigation and each page is behind a role guard.
+
+### A.1 Decisions at a glance
+
+The brief is deliberately underspecified, so the choices and the alternatives that were weighed are written down here; the sections
+named in the last column give the detail. "Revisit when" says what would change the answer.
+
+| Decision | Chosen | Alternatives considered | Why | Revisit when |
+|---|---|---|---|---|
+| Service boundaries | One modular monolith (B.1) | Separate claims, notification and reporting services | A claim, its history and its event must change in one transaction; one team and one bounded context | Notifications or reporting need their own scaling or release cycle (the event is the seam) |
+| REST or Kafka | Commands and reads over REST; one event per status change over Kafka (B.3) | Everything over REST; direct send to Kafka from the service | Callers need an immediate answer; consumers can be slow and must never fail a claim update | A consumer needs to react in real time with its own guarantees |
+| How events are produced | Transactional outbox plus a relay (B.3) | Send to Kafka inside the service call | Avoids lost or phantom events when the commit and the send disagree | Several instances run (add row locking or a dedicated relay) |
+| Status changes | One `PUT` command per transition (B.7) | One `PATCH /claims/{id}` with a target status | Each transition has its own rule, role and required note, and the server answers 409 if it is not allowed | The workflow becomes configurable |
+| Market | Validated two-letter code (B.2) | A `Market` enum | The list of markets is business data the code does not own | Markets need per-market rules or currencies |
+| Frontend shape | One Angular app, lazy-loaded role areas, one API service (C.1) | Micro-frontends (a shell with separately deployed remotes) | One team, one release, and the roles share the claim screens; federation would add build and runtime cost with nothing to gain at this size | Separate teams must release the claimant and staff areas independently |
+| Frontend state | Signals in components, one API service, a central action table (C.5) | NgRx or another store | State is per screen and short-lived; there is nothing shared enough to justify a store | Screens start sharing and mutating the same data |
+| Browser to backend | Same-origin: dev proxy, or nginx in Docker (D.2) | Adding CORS to the backend | The backend owns the contract and is not edited from the UI; same-origin also works unchanged behind a gateway | The SPA is served from another origin |
+| Database | In-memory H2, schema from Hibernate | PostgreSQL with migrations | No database server was available to the author (`AI_JOURNAL.md`, Prompt 3); keeps the project runnable with one command | Data must survive a restart (PostgreSQL, Flyway; part E) |
+
+**What was built and what was left out.** The time went first to the backend (all 19 endpoints, workflow rules, audit history, outbox,
+dashboards, tests), then to a complete Angular UI for all three roles. Left out on purpose, each with a next step in part E: a persistent
+database and migrations, optimistic locking, a Kafka consumer (notifications), refresh tokens, browser-level end-to-end tests and an
+accessibility audit.
 
 ---
 
@@ -188,20 +210,42 @@ JWT (HS256) in `Authorization: Bearer`, stateless; BCrypt passwords; method secu
 Other claimants' or officers' claims return **404**, not 403, so existence is not leaked. Public registration can only
 create claimants.
 
-Reachable **without an application token**: `POST /api/auth/register` and `/login`, Swagger UI and the OpenAPI document, `/error`, and the **H2 console** (`/h2-console/**`, enabled with `web-allow-others` in the documented local configuration). Anyone who can reach the console may be able to read or change the database. Disable it (`spring.h2.console.enabled=false`) and remove or restrict its security exception before any shared deployment.
+Reachable **without an application token**: `POST /api/auth/register` and `/login`, Swagger UI and the OpenAPI document, and `/error`.
+The **H2 console** is **off by default**: `SecurityConfig` adds its `/h2-console/**` rule (and the same-origin frame setting it needs) only when
+it is switched on with `H2_CONSOLE_ENABLED=true`, and a test checks that it is unreachable otherwise. When it is on it needs no sign-in, so anyone
+who can reach the port can read and change the database; use it only on your own machine.
 
 ### B.6 Error model
 RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map for field validation.
 `400` validation or bad input, `401` no/invalid token, `403` role or ownership, `404` not found or not visible,
 `405`/`415` wrong method or content type, `409` invalid state transition or conflict, `500` generic (details only in logs).
 
-### B.7 Testing strategy
+### B.7 API conventions
+- **Commands, not a generic status patch.** Each transition is its own `PUT /api/claims/{id}/<command>` (`review`, `request-info`,
+  `approve`, `reject`, `settle`, `provide-info`, `pickup`, `assign`). The server checks the command against the claim's current status
+  (one table in `ClaimService`), the caller's role and assignment, and the required note, and answers `409` when the transition is not
+  allowed. A repeated command is retry-safe in effect: a transition answers `409` and changes nothing because the claim has already moved
+  on (an officer picking up a claim already assigned to them simply succeeds again).
+- **Create returns `201` with a `Location` header** pointing at the new claim (`/api/claims/{id}`); a test checks the header and that the
+  address works.
+- **Lists are paged** (`page`, `size`, newest first; the officer queue oldest first) and role-scoped by the server, never by the client.
+- **One error shape** (RFC 7807, B.6) with a field-to-message map on `400`; `404` instead of `403` for claims the caller may not see.
+- **Documented in OpenAPI.** Every endpoint has a summary, a description of who may call it and what it does to the status, and its error
+  responses; request bodies carry examples so Swagger's "Try it out" is pre-filled with valid values. `ApiContractTest` fails if an endpoint
+  is added without a summary. The document is served at `/v3/api-docs` and the UI at `/swagger-ui/index.html`.
+
+### B.8 Testing strategy
 - Unit tests with Mockito for services, the audit recorder, the outbox relay and the publishers.
 - Validation tests for request rules (policy, amount, future date, description length, claim type, market).
-- Two Spring Boot integration tests on H2: the original role/workflow flow and the lifecycle extensions (queue, pick-up,
-  claimant answer, history, filter, outbox, liability breakdown).
+- Spring Boot integration tests on H2: the original role/workflow flow, the lifecycle extensions (queue, pick-up, claimant answer,
+  history, filter, outbox, liability breakdown), and `ApiContractTest` (the `Location` header, the H2 console closed by default, every
+  endpoint documented).
 - Wiring tests prove the publisher is chosen by configuration.
 - Postman collection (`backend/postman/`) replays the same flow, with assertions, in collection order.
+- **Coverage is measured, not assumed:** `mvn test` runs JaCoCo and writes `backend/target/site/jacoco/index.html`. On 2026-10-24
+  (JDK 21, JaCoCo 0.8.15, 85 tests): **97.0% of lines (520/536), 96.7% of instructions, 85.7% of branches (90/105)**. It is a report, not a
+  build gate; the lowest are the application's main class, `config` (91.5%) and `security` (93.9%). Coverage shows what ran, not that it was asserted well, so
+  the role matrix and the workflow are also exercised by the Postman run and the manual script in `docs/`.
 
 ---
 
@@ -361,7 +405,8 @@ The items below are current gaps or verification requirements, not claims that t
 | With the broker down, `KafkaTemplate.send` can block up to Kafka's default `max.block.ms` (60 s) before the 10 s acknowledgement timeout applies, holding the relay thread and its transaction | `spring.kafka.producer.properties.max.block.ms=10000` |
 | Outbox poller runs in every instance, so duplicates are possible with several instances | Row locking (`FOR UPDATE SKIP LOCKED`) or a dedicated relay |
 | `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL (add the driver; the datasource example is already commented in `application.properties`), real user provisioning |
-| The H2 console is enabled, permitted without a token and open to other hosts (`web-allow-others`), in `application.properties` and in the Docker compose file | Disable it outside local development (`spring.h2.console.enabled=false`) and remove the `/h2-console/**` rule from `SecurityConfig` |
+| The H2 console is opt-in (`H2_CONSOLE_ENABLED=true`; off by default, in `application.properties` and in the Docker compose file) but, when on, needs no sign-in | Never enable it in a shared environment; once a persistent database replaces H2, delete the console settings and the `SecurityConfig` branch |
+| Test coverage is a report (JaCoCo, 97.0% lines), not a build gate, and there is no CI | Add a coverage threshold and a CI workflow that runs `mvn verify` and `npm test` |
 | `assignedOfficer` can be re-assigned without a history entry; rejected and settled claims can still be reassigned | Record assignment events; refuse assignment of terminal claims |
 | Performance dashboard counts only; no time-to-decision | Use `claim_status_history` timestamps |
 | No claimant notifications | Consumer of `ClaimStatusChanged` (the seam exists) |
