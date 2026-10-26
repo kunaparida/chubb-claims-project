@@ -279,4 +279,4 @@ item and either change the code to match this file or change this file to match 
   for a claim the caller may not see). Downloads are `attachment` with `nosniff` and `no-store`. Do not trust `getContentType()` from the
   client, and do not widen the accepted types without adding the signature for each.
 
-See `../ARCHITECTURE.md` (part B) for the reasoning.
+See `../ARCHITECTURE.md` (sections 4 to 8) for the reasoning.

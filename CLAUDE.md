@@ -12,7 +12,7 @@ One repository, three applications, one set of documents:
 | `frontend/` | Angular 22 single-page app for claimants, officers and managers | [frontend/CLAUDE.md](frontend/CLAUDE.md) |
 | `notification-service/` | Spring Boot Kafka consumer that emails the claimant on each status change (no database, no business API) | [notification-service/CLAUDE.md](notification-service/CLAUDE.md) |
 | `README.md` | How to run it, accounts, API summary | keep it the single entry point |
-| `ARCHITECTURE.md` | Backend (part B), frontend (part C), integration (part D), limitations (part E) | update it when a design decision changes |
+| `ARCHITECTURE.md` | Numbered sections 1 to 12: system context, decisions, components, backend, domain, lifecycle, events and the notification service (7), security, frontend, integration, testing, limitations (12) | update it when a design decision changes |
 | `AI_JOURNAL.md` | How AI was used: backend Parts A–B, frontend and packaging Part C (F-numbers), open questions D, limitations E, open items F | see rule 4 |
 | `docs/` | `E2E-VALIDATION-FLOW.txt` (manual test script), `SWAGGER-TEST-GUIDE.txt` | keep the numbers in the E2E script true when behaviour changes |
 | `docker-compose.yml`, `DOCKER.md`, `*/Dockerfile`, `frontend/nginx.conf` | Containers: Kafka + backend + notification service + Mailpit + frontend | keep `DOCKER.md` and the compose file in step; the topic names appear in compose in `kafka-init` and in the environment of both Kafka users and must match `EVENTS_TOPIC` / `DEAD_LETTER_TOPIC` |
@@ -58,4 +58,4 @@ One repository, three applications, one set of documents:
 11. **The `ClaimStatusChanged` event is a contract between the backend and the notification service.** Only add fields, never rename or remove one
     (`ClaimAuditRecorderTest` pins the names the service reads). The event carries the claimant's email and name, which are personal data: do not add
     fields a consumer does not need, never log an address unmasked (`Masking.email` in the service), and keep the officer's notes out of the event.
-    A change to the event changes `notification-service/` (`ClaimStatusChanged`, `EventParser`, its tests) and `ARCHITECTURE.md` B.3 in the same commit.
+    A change to the event changes `notification-service/` (`ClaimStatusChanged`, `EventParser`, its tests) and `ARCHITECTURE.md` section 7.3 in the same commit.

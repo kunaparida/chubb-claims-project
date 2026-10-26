@@ -6,7 +6,7 @@ Guidance for Claude Code (and any human) working in `notification-service/`. The
 
 A small Spring Boot 3.4.5 / Java 21 application (port 8081, **no database, no business API**). It reads `ClaimStatusChanged` events from the Kafka
 topic the claims backend publishes to (through its transactional outbox) and sends the **claimant** an email for each one. Design and guarantees:
-[../ARCHITECTURE.md](../ARCHITECTURE.md) B.10.
+[../ARCHITECTURE.md](../ARCHITECTURE.md) section 7.4.
 
 ```
 com.claims.notification
@@ -27,8 +27,9 @@ com.claims.notification
 * `mvn test` runs **76 tests in about one to two minutes**: unit tests, the SMTP sender against GreenMail, and two Spring Boot tests that start a **real Kafka broker
   inside the JVM** (`@EmbeddedKafka`, KRaft, 3 partitions) with a real SMTP server. No Docker needed.
 * `mvn package -DskipTests` builds `target/claims-notification-service-1.0.0.jar`.
-* To run by hand you need a Kafka broker you provide (the compose file has one): `SPRING_KAFKA_BOOTSTRAP_SERVERS=...`. `NOTIFICATIONS_MAIL_MODE=log`
-  prints emails instead of sending them. Defaults suit Mailpit on `localhost:1025`.
+* To run by hand you need a Kafka broker you provide (the compose file has one): `SPRING_KAFKA_BOOTSTRAP_SERVERS=...`. The default mode is `log` (set in `application.properties`): it prints each
+  email instead of sending it, so no mail server is needed. `NOTIFICATIONS_MAIL_MODE=smtp` sends through `MAIL_HOST` (default `localhost:1025`, which suits Mailpit);
+  Docker Compose sets `smtp` and points it at the `mailpit` container.
 
 ## Rules
 
@@ -43,7 +44,7 @@ com.claims.notification
    retried, `BadEventException` is dead-lettered at once. Do not catch and swallow exceptions in the listener or the senders.
 5. **`@KafkaListener` must keep `idIsGroup = false`** with `groupId = ${spring.kafka.consumer.group-id}`. Without it Spring Kafka uses the listener id as the
    group and silently ignores `NOTIFICATIONS_GROUP_ID` (found in a live run; `NotificationFlowTest` pins it).
-6. **No new channels or templates without a decision:** email only, one wording per status, English. Each is a listed limitation (ARCHITECTURE part E).
+6. **No new channels or templates without a decision:** email only, one wording per status, English. Each is a listed limitation (ARCHITECTURE section 12).
 7. **Tests with a Kafka broker use the existing base class** (`KafkaFlowTestBase`): topics `it.claim-status-changed` and `.dlt`, short retries, a dead-letter
    reader. Prefer a unit test when the behaviour does not need a broker.
 8. Format and conventions as in the other applications: constructor injection, small classes, comments that say *why*. **Commit only when asked.** Ask before

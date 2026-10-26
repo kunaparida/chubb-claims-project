@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 700" width="1100" height="700" role="img" aria-labelledby="t d">
+  <title id="t">System architecture</title>
+  <desc id="d">People use the Angular frontend, which calls the Spring Boot claims backend. The backend saves claims, history and an outbox event in one database transaction. A scheduled relay sends the event to Kafka, and the notification service reads it and emails the claimant.</desc>
+  <defs>
+    <marker id="solid" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="dash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#C6537C"/>
+    </marker>
+    <style>
+      text { font-family: "Segoe UI", Arial, sans-serif; fill: #1f2937; }
+      .title { font-size: 20px; font-weight: 700; }
+      .sub { font-size: 12.5px; fill: #475569; }
+      .h { font-size: 14px; font-weight: 700; }
+      .t { font-size: 12.5px; }
+      .lbl { font-size: 11.5px; fill: #475569; }
+      .people { fill: #EAF2FF; stroke: #4777C7; stroke-width: 1.5; }
+      .frontend { fill: #E8F7F1; stroke: #24936E; stroke-width: 1.5; }
+      .backend { fill: #F0ECFF; stroke: #7861C8; stroke-width: 1.5; }
+      .storage { fill: #FFF3D9; stroke: #C88A21; stroke-width: 1.5; }
+      .events { fill: #FCE8F0; stroke: #C6537C; stroke-width: 1.5; }
+      .zone { fill: #F7F5FF; stroke: #7861C8; stroke-width: 1.2; stroke-dasharray: 2 0; }
+      .flow { stroke: #475569; stroke-width: 1.8; fill: none; marker-end: url(#solid); }
+      .async { stroke: #C6537C; stroke-width: 1.8; fill: none; stroke-dasharray: 7 5; marker-end: url(#dash); }
+    </style>
+  </defs>
+
+  <rect x="1" y="1" width="1098" height="698" rx="14" fill="#FFFFFF" stroke="#D7DEEA"/>
+  <text x="30" y="38" class="title">System architecture</text>
+  <text x="30" y="60" class="sub">Solid arrows: the synchronous claim workflow.  Dashed arrows: the asynchronous notification path.</text>
+
+  <!-- people -->
+  <rect x="30" y="100" width="170" height="44" rx="10" class="people"/>
+  <text x="115" y="127" text-anchor="middle" class="h">Claimant</text>
+  <rect x="30" y="160" width="170" height="44" rx="10" class="people"/>
+  <text x="115" y="187" text-anchor="middle" class="h">Claims officer</text>
+  <rect x="30" y="220" width="170" height="44" rx="10" class="people"/>
+  <text x="115" y="247" text-anchor="middle" class="h">Manager</text>
+
+  <!-- frontend -->
+  <rect x="270" y="120" width="190" height="124" rx="10" class="frontend"/>
+  <text x="365" y="156" text-anchor="middle" class="h">Angular 22 frontend</text>
+  <text x="365" y="180" text-anchor="middle" class="t">one app, role-specific screens</text>
+  <text x="365" y="200" text-anchor="middle" class="t">calls /api through a</text>
+  <text x="365" y="218" text-anchor="middle" class="t">dev proxy or nginx</text>
+
+  <path d="M200 122 L270 150" class="flow"/>
+  <path d="M200 182 L270 182" class="flow"/>
+  <path d="M200 242 L270 214" class="flow"/>
+
+  <!-- backend zone -->
+  <rect x="540" y="80" width="520" height="250" rx="12" class="zone"/>
+  <text x="560" y="104" class="h">Claims backend: Spring Boot 3.4, Java 21</text>
+  <rect x="570" y="118" width="460" height="48" rx="9" class="backend"/>
+  <text x="800" y="147" text-anchor="middle" class="t">REST API · JWT login · role and ownership checks</text>
+  <rect x="570" y="184" width="460" height="56" rx="9" class="backend"/>
+  <text x="800" y="208" text-anchor="middle" class="t">Claim services</text>
+  <text x="800" y="226" text-anchor="middle" class="t">validation · workflow rules · assignment · documents</text>
+  <rect x="570" y="258" width="220" height="48" rx="9" class="backend"/>
+  <text x="680" y="287" text-anchor="middle" class="t">Status history (audit)</text>
+  <rect x="810" y="258" width="220" height="48" rx="9" class="backend"/>
+  <text x="920" y="287" text-anchor="middle" class="t">Transactional outbox</text>
+  <path d="M800 166 V184" class="flow"/>
+  <path d="M740 240 L680 258" class="flow"/>
+  <path d="M860 240 L920 258" class="flow"/>
+
+  <path d="M460 142 H570" class="flow"/>
+  <text x="515" y="134" text-anchor="middle" class="lbl">/api (REST)</text>
+
+  <!-- database -->
+  <rect x="540" y="372" width="520" height="72" rx="10" class="storage"/>
+  <text x="800" y="400" text-anchor="middle" class="h">H2 database (in memory, resets on restart)</text>
+  <text x="800" y="423" text-anchor="middle" class="t">claims · users · documents · history · outbox</text>
+  <path d="M800 330 V372" class="flow"/>
+  <text x="812" y="356" class="lbl">claim, history and outbox saved in one transaction</text>
+
+  <!-- async path -->
+  <text x="124" y="504" class="h">After the transaction: tell the claimant by email</text>
+  <path d="M560 444 V478 H100 V520" class="async"/>
+  <text x="330" y="472" text-anchor="middle" class="lbl">pending outbox rows</text>
+
+  <rect x="30" y="520" width="140" height="64" rx="10" class="events"/>
+  <text x="100" y="548" text-anchor="middle" class="h">Outbox relay</text>
+  <text x="100" y="567" text-anchor="middle" class="t">scheduled, oldest first</text>
+
+  <rect x="206" y="520" width="140" height="64" rx="10" class="events"/>
+  <text x="276" y="548" text-anchor="middle" class="h">Event publisher</text>
+  <text x="276" y="567" text-anchor="middle" class="t">log (default) or Kafka</text>
+
+  <rect x="382" y="520" width="160" height="64" rx="10" class="events"/>
+  <text x="462" y="548" text-anchor="middle" class="h">Kafka topic</text>
+  <text x="462" y="567" text-anchor="middle" class="t" style="font-size:11px">claims.claim-status-changed</text>
+
+  <rect x="578" y="520" width="180" height="64" rx="10" class="events"/>
+  <text x="668" y="548" text-anchor="middle" class="h">Notification service</text>
+  <text x="668" y="567" text-anchor="middle" class="t">skips duplicates, retries</text>
+
+  <rect x="794" y="520" width="140" height="64" rx="10" class="events"/>
+  <text x="864" y="548" text-anchor="middle" class="h">SMTP server</text>
+  <text x="864" y="567" text-anchor="middle" class="t">Mailpit inbox in Docker</text>
+
+  <rect x="970" y="520" width="110" height="64" rx="10" class="people"/>
+  <text x="1025" y="548" text-anchor="middle" class="h">Claimant</text>
+  <text x="1025" y="567" text-anchor="middle" class="t">gets the email</text>
+
+  <path d="M170 552 H206" class="async"/>
+  <path d="M346 552 H382" class="async"/>
+  <path d="M542 552 H578" class="async"/>
+  <path d="M758 552 H794" class="async"/>
+  <path d="M934 552 H970" class="async"/>
+  <text x="462" y="604" text-anchor="middle" class="lbl">Kafka mode only</text>
+
+  <rect x="578" y="624" width="180" height="44" rx="10" class="events"/>
+  <text x="668" y="651" text-anchor="middle" class="t">Dead-letter topic (.dlt)</text>
+  <path d="M668 584 V624" class="async"/>
+  <text x="680" y="608" class="lbl">after the retries fail</text>
+</svg>

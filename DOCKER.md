@@ -202,7 +202,7 @@ moved to the dead-letter topic; read it with:
 docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic claims.claim-status-changed.dlt --from-beginning --property print.headers=true
 ```
 
-The headers (`kafka_dlt-exception-message`, `kafka_dlt-original-topic`) say why. Nothing replays the dead-letter topic automatically (see `ARCHITECTURE.md` part E).
+The headers (`kafka_dlt-exception-message`, `kafka_dlt-original-topic`) say why. Nothing replays the dead-letter topic automatically (see `ARCHITECTURE.md` section 12).
 
 **5.4 Prove the outbox survives a broker outage** (optional, shows why the outbox exists):
 
@@ -272,7 +272,7 @@ What was checked in the code (`application.properties`, `KafkaEventPublisher`, `
 | Topic name | `app.events.topic=${EVENTS_TOPIC:claims.claim-status-changed}` | Same name set explicitly in compose and in `kafka-init` |
 | Topic creation | Neither application creates a topic (no `NewTopic` bean) | `kafka-init` creates `claims.claim-status-changed` (3 partitions) and its dead-letter topic `.dlt` (1 partition), replication factor 1. Broker auto-creation is **disabled**, so a topic-name mismatch fails visibly instead of silently creating a stray topic. If you change `EVENTS_TOPIC` or `DEAD_LETTER_TOPIC`, change `kafka-init` too |
 | Serialization | No producer settings; Spring Boot defaults to String key and String value, matching `KafkaTemplate<String, String>` | Nothing to do. Key = claim id, so one claim's events stay ordered in one partition; value = the JSON event |
-| Delivery | The relay waits up to 10 s for the broker acknowledgement and marks the row published only afterwards; at-least-once | Consumers must de-duplicate on `eventId` (documented in `ARCHITECTURE.md` part B.3) |
+| Delivery | The relay waits up to 10 s for the broker acknowledgement and marks the row published only afterwards; at-least-once | Consumers must de-duplicate on `eventId` (documented in `ARCHITECTURE.md` section 7.3) |
 | Relay scheduling | `@EnableScheduling` is present (`SchedulingConfig`); poll every `OUTBOX_POLL_MS` (5 s), 50 rows per run | Compose sets `OUTBOX_POLL_MS=5000` |
 | **Broker-down behaviour** | By Kafka's default `max.block.ms` (60 s), `send()` can wait up to a minute for broker metadata *before* the 10 s acknowledgement timeout starts, holding the relay thread and its database transaction meanwhile | **Not changed** (the Kafka settings are as they were). Recommended: `spring.kafka.producer.properties.max.block.ms=10000` in `application.properties` |
 | Consumers | The notification service (group `claims-notification-service`, offsets committed after each email, retries then dead-letter) | It runs in compose; use the console consumer in 5.2 to observe the same events |
@@ -317,7 +317,8 @@ EVENTS_PUBLISHER=kafka
 SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9094
 ```
 
-Then, in `frontend/`, `npm start` and open http://localhost:4200 as usual.
+Then, in `frontend/`, `npm start` and open http://localhost:4200 as usual. To see the emails too, run the notification service by hand in `notification-service/`
+(`mvn spring-boot:run`): its defaults point at `localhost:9094` and it prints each email in its own log (mode `log`), so you need no mail server.
 
 **Everything in Docker but without Kafka** (events are only logged):
 
@@ -325,6 +326,8 @@ Then, in `frontend/`, `npm start` and open http://localhost:4200 as usual.
 $env:EVENTS_PUBLISHER = "log"; docker compose up --build -d
 ```
 
+With `EVENTS_PUBLISHER=log` nothing reaches Kafka, so the notification service has nothing to read and **no emails are sent**.
+
 **Production notes.** Before any real deployment: set a unique `JWT_SECRET` (Base64, at least 32 bytes) and `BOOTSTRAP_PASSWORD` as environment
 variables on the backend service, move from in-memory H2 to PostgreSQL, give Kafka a volume, three brokers and TLS/SASL, and serve the frontend
-over HTTPS. See `ARCHITECTURE.md` part E for the full list.
+over HTTPS. See `ARCHITECTURE.md` section 12 for the full list.
