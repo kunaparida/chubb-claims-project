@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 486" width="1000" height="486" role="img" aria-labelledby="t d">
+  <title id="t">Claim lifecycle</title>
+  <desc id="d">A claim starts as submitted, then goes under review. From review it can need more information and return to review, be approved and then settled, or be rejected. Rejected and settled are final.</desc>
+  <defs>
+    <marker id="solid" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#475569"/>
+    </marker>
+    <style>
+      text { font-family: "Segoe UI", Arial, sans-serif; fill: #1f2937; }
+      .title { font-size: 20px; font-weight: 700; }
+      .sub { font-size: 12.5px; fill: #475569; }
+      .h { font-size: 14px; font-weight: 700; }
+      .t { font-size: 12.5px; }
+      .lbl { font-size: 12px; fill: #334155; }
+      .people { fill: #EAF2FF; stroke: #4777C7; stroke-width: 1.5; }
+      .frontend { fill: #E8F7F1; stroke: #24936E; stroke-width: 1.5; }
+      .backend { fill: #F0ECFF; stroke: #7861C8; stroke-width: 1.5; }
+      .storage { fill: #FFF3D9; stroke: #C88A21; stroke-width: 1.5; }
+      .events { fill: #FCE8F0; stroke: #C6537C; stroke-width: 1.5; }
+      .final { stroke-width: 3.5; }
+      .flow { stroke: #475569; stroke-width: 1.8; fill: none; marker-end: url(#solid); }
+    </style>
+  </defs>
+
+  <rect x="1" y="1" width="998" height="484" rx="14" fill="#FFFFFF" stroke="#D7DEEA"/>
+  <text x="30" y="38" class="title">Claim lifecycle</text>
+  <text x="30" y="60" class="sub">Each box is a claim status. A thick border means the status is final: nothing can change it any more.</text>
+
+  <!-- start -->
+  <circle cx="34" cy="159" r="7" fill="#475569"/>
+  <path d="M41 159 H60" class="flow"/>
+
+  <!-- main row -->
+  <rect x="60" y="130" width="170" height="58" rx="10" class="people"/>
+  <text x="145" y="156" text-anchor="middle" class="h">SUBMITTED</text>
+  <text x="145" y="174" text-anchor="middle" class="t">claimant reported it</text>
+
+  <rect x="320" y="130" width="190" height="58" rx="10" class="backend"/>
+  <text x="415" y="156" text-anchor="middle" class="h">UNDER_REVIEW</text>
+  <text x="415" y="174" text-anchor="middle" class="t">an officer is assessing it</text>
+
+  <rect x="610" y="130" width="160" height="58" rx="10" class="frontend"/>
+  <text x="690" y="156" text-anchor="middle" class="h">APPROVED</text>
+  <text x="690" y="174" text-anchor="middle" class="t">decision made</text>
+
+  <rect x="840" y="130" width="130" height="58" rx="10" class="frontend final"/>
+  <text x="905" y="156" text-anchor="middle" class="h">SETTLED</text>
+  <text x="905" y="174" text-anchor="middle" class="t">paid, final</text>
+
+  <path d="M230 159 H320" class="flow"/>
+  <text x="275" y="150" text-anchor="middle" class="lbl">start review</text>
+  <path d="M510 159 H610" class="flow"/>
+  <text x="560" y="150" text-anchor="middle" class="lbl">approve</text>
+  <path d="M770 159 H840" class="flow"/>
+  <text x="805" y="150" text-anchor="middle" class="lbl">settle</text>
+
+  <!-- more information loop -->
+  <rect x="320" y="290" width="190" height="58" rx="10" class="storage"/>
+  <text x="415" y="316" text-anchor="middle" class="h">MORE_INFO_REQUIRED</text>
+  <text x="415" y="334" text-anchor="middle" class="t">waiting for the claimant</text>
+  <path d="M345 188 V290" class="flow"/>
+  <text x="337" y="232" text-anchor="end" class="lbl">request</text>
+  <text x="337" y="248" text-anchor="end" class="lbl">information</text>
+  <path d="M485 290 V188" class="flow"/>
+  <text x="477" y="232" text-anchor="end" class="lbl">claimant answers,</text>
+  <text x="477" y="248" text-anchor="end" class="lbl">or staff resume</text>
+
+  <!-- reject -->
+  <rect x="610" y="290" width="160" height="58" rx="10" class="events final"/>
+  <text x="690" y="316" text-anchor="middle" class="h">REJECTED</text>
+  <text x="690" y="334" text-anchor="middle" class="t">decision made, final</text>
+  <path d="M508 178 L640 290" class="flow"/>
+  <text x="592" y="232" class="lbl">reject</text>
+
+  <!-- note -->
+  <rect x="30" y="384" width="940" height="82" rx="10" fill="#F8FAFC" stroke="#D7DEEA"/>
+  <text x="48" y="410" class="h">Good to know</text>
+  <text x="48" y="432" class="t">Picking up or assigning a claim only chooses the officer: the status stays SUBMITTED until the review starts.</text>
+  <text x="48" y="451" class="t">Any other move (for example approving a SUBMITTED claim) is refused with HTTP 409 Conflict.</text>
+</svg>

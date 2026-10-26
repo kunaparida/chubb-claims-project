@@ -2,20 +2,21 @@
 
 | | |
 |---|---|
-| **Project** | Claims Platform: `backend/` (Spring Boot, formerly `chubb-claims-backendService`) and `frontend/` (Angular, formerly `claim_management_UI`) |
+| **Project** | Claims Platform: `backend/` (Spring Boot, formerly `chubb-claims-backendService`), `frontend/` (Angular, formerly `claim_management_UI`) and `notification-service/` (Kafka consumer that sends email) |
 | **Author** | Kuna Parida |
-| **Document purpose** | Record of how AI assistance was used: the prompts that shaped the design, found a defect or changed the repository, what the AI produced, and what was accepted, challenged or overridden, with the reasoning. |
+| **Document purpose** | A record of how AI was used: the prompts that shaped the design, found a defect or changed the repository; what the AI produced; and what was accepted, challenged or overridden, and why. |
 | **Last updated** | 2026-10-26 |
 
-This is the single journal for the whole submission (the backend and frontend journals merged). The author reviews and takes
-responsibility for every line in this repository. AI output is treated as a proposal, not a result, until a build, a test run or a manual
-check has verified it. Each entry says what was **actually verified** and what was **not**.
+This is the single journal for the whole submission. The author reviews and takes responsibility for every line in this repository. AI output is treated as a
+proposal until a build, a test run or a manual check has proved it. Each entry says what was **actually checked** and what was **not**.
 
-**Prompt authenticity:** prompt blocks are reproduced as recorded where the original wording was retained. Where the original wording was not preserved, the entry is explicitly labelled **reconstructed prompt summary (not verbatim)**. This distinction is intentional: it shows the kind of instruction used without presenting newly written wording as an exact historical transcript.
+**Prompts.** A prompt block is copied exactly where the original wording was kept. Where it was not kept, the entry says **reconstructed prompt summary (not verbatim)**, so a newly written sentence is never passed off as an exact quote.
 
-> **How to read the Decision line.** `Decision` is the *author's* call. Where the author has not yet reviewed an entry it says
-> `Pending author review`; it is deliberately not pre-filled. What the AI found or got wrong is recorded under *Result* and
-> *Corrections*, not disguised as the author's decisions.
+> **The Decision line** is the *author's* call. Until the author has reviewed an entry it says `Pending author review`. What the AI found or got wrong is written under *Result* and *Corrections*, not hidden inside the author's decisions.
+
+> **Section numbers in older entries.** Entries F1 to F10 mention parts of `ARCHITECTURE.md` by their old letters (A.1, B.3, B.9, B.10, C.7, D.2, "part E"). The document has since been rewritten with numbered sections. Use this map:
+> decisions table (A.1) → section 2; backend design (B) → sections 4 to 8; claim documents (B.9) → 4.3; events (B.3) → 7.3; notification service (B.10) → 7.4; testing (B.8, C.8) → 11;
+> frontend (C) → 9; integration decisions and the proxy (D, D.2) → 10; known limitations (part E) → 12.
 
 ## At a glance
 
@@ -33,8 +34,9 @@ check has verified it. Each entry says what was **actually verified** and what w
 | 8 | The AI converted the database to PostgreSQL; the author **overrode** it and kept H2. | F6 |
 | 9 | Reviewing the project against a scoring rubric found dead code, an unauthenticated database console and undocumented endpoints; all three were fixed and **verified on the running app**. | F7 |
 | 10 | After a UI redesign, looking at the **running app** found what 250 unit tests could not: a blank logo on phone screens (two logos shared one gradient id), a header four rows tall, wrapping claim numbers. All fixed and re-checked. | F8 |
-| 11 | A request for an *optional upload* had nothing to land on (the API could not store a file), so it was built end to end. The file type is judged from the file's **first bytes**, not its name. Live use then found a wrong download filename header, an unstyled button and a cramped phone layout (fixed twice), and the AI caught its own wrong error message in a guide by reading the handler before leaving it. | F9 |
-| 12 | For the notification service the AI found that the event it was asked to "send" **did not contain the claimant's email**, and that the Kafka producer already existed, so only the consumer was new. Its tests were all green, yet the first run of the real applications together showed the consumer group id was silently ignored (`@KafkaListener`'s `id` doubles as the group). Fixed with a test that was seen to fail first. | F10 |
+| 11 | A request for an *optional upload* had nothing to land on, because the API could not store a file, so it was built from end to end. The file type is judged from the file's **first bytes**, not its name. Using the running app then found a wrong download header, an unstyled button and a cramped phone layout. | F9 |
+| 12 | For the notification service the AI found that the Kafka producer already existed, and that the event **had no claimant email** to send to. All tests were green, yet the first run of the real applications together showed the consumer group setting was being ignored. It was fixed with a test that was first seen to fail. | F10 |
+| 13 | After the Kafka commit, a check of the whole project found that the README was an older copy (old test counts, no notification service), that `ARCHITECTURE.md` pointed to three diagram files that did not exist, and that many documents used section letters that no longer existed. All fixed. | F11 |
 
 **Evidence rather than assertion:** 118 backend tests (97.1% line coverage, measured by JaCoCo), 76 notification-service tests (a real Kafka broker and SMTP server run inside them), 312 frontend tests, a live run of the real applications together, a 28-check and a
 45-check scripted run against the real backend, a browser walkthrough, and a mutation check that deliberately broke a rule to prove the
@@ -56,7 +58,7 @@ tests notice. What was *not* run (Docker, Kafka against a broker, the real file-
 | **CHALLENGED** | AI output questioned or verified, then kept or changed. |
 | **OVERRODE** | The author decided differently from the AI. |
 
-**Prompt inventory:** the log includes the retained substantive backend prompts (1–4), reconstructed prompt summaries for major backend design decisions (D1–D4), and the frontend/integration/packaging/review prompts (F1–F10). Routine prompts (run this, fix that typo, re-format, "continue") are omitted unless they materially changed the implementation. Where wording was not retained, it is labelled as reconstructed rather than verbatim.
+**Prompt inventory:** the log includes the retained substantive backend prompts (1–4), reconstructed prompt summaries for major backend design decisions (D1–D4), and the frontend/integration/packaging/review prompts (F1–F11). Routine prompts (run this, fix that typo, re-format, "continue") are omitted unless they materially changed the implementation. Where wording was not retained, it is labelled as reconstructed rather than verbatim.
 
 **Decision lines.** For entries the author has not yet written up, the AI adds a *Proposed* verdict with its reasons, taken from the record (what was checked, what was corrected). It is a suggestion only: the author confirms it or replaces it with their own words.
 
@@ -72,6 +74,7 @@ tests notice. What was *not* run (Docker, Kafka against a broker, the real file-
 | 6. UI redesign | F8 | `frontend/` | A professional look (logo, design system, light and dark), and a new report form: market list, 7-day date window, generated policy number. |
 | 7. Documents | F9 | `backend/`, `frontend/`, root documents | Optional document upload (three new endpoints, a section on the report form, a Documents box on the claim page) and a message for every missing or invalid field. Takes the API from 19 to 22 endpoints. |
 | 8. Notifications | F10 | `notification-service/`, `backend/` (event), compose, documents | A separate service that consumes the status-change events from Kafka and emails the claimant: retries, a dead-letter topic, duplicate protection, a local inbox (Mailpit) in Docker. The event gains the claimant's email and name. |
+| 9. Final check | F11 | root documents, `docs/diagrams/` | Everything re-tested from the committed state; README brought up to date, three missing diagrams added, document cross-references fixed, wording made simpler. |
 
 ## 3. Key outcomes
 
@@ -86,8 +89,8 @@ tests notice. What was *not* run (Docker, Kafka against a broker, the real file-
   topic and duplicate protection. Its tests run a real Kafka broker and SMTP server in the JVM, and the real applications were run together once outside Docker.
 - An Angular 22 UI (zoneless, signals) integrating all 22 endpoints for the three roles in one app: 312 Vitest tests and a clean strict
   production build (about 316 kB initial).
-- Both applications, their histories and one set of documents in a single repository, with a Docker Compose stack (backend, frontend,
-  Kafka). What has not been run or clicked through is stated in the entries and in `ARCHITECTURE.md` part E.
+- All three applications, their histories and one set of documents in a single repository, with a Docker Compose stack (backend, frontend,
+  notification service, Mailpit, Kafka). What has not been run or clicked through is stated in the entries and in `ARCHITECTURE.md` section 12.
 
 ---
 
@@ -750,8 +753,49 @@ libraries were not in the local Maven cache. The author allowed the download.
   backend older than this change (they have no address and would be dead-lettered); the new E2E Part 13 (written from the same rules, its C2 and C3 counts not observed). The frontend was not changed.
 
 **Decision:** `Pending author review`. *Proposed by the AI:* **ACCEPTED**, with these for the author to confirm: a separate service rather than a consumer inside the backend; the claimant's email and name travelling
-on the topic (personal data on the topic and on the dead-letter topic, see ARCHITECTURE part E); duplicate protection kept in memory only; English-only, email-only wording; and whether the extra build tooling
+on the topic (personal data on the topic and on the dead-letter topic, see ARCHITECTURE section 12); duplicate protection kept in memory only; English-only, email-only wording; and whether the extra build tooling
 downloaded in correction 5 is acceptable.
+
+---
+
+## F11: Check the whole project after the Kafka work, and fix the documents
+
+**Prompt** (verbatim, spelling as sent)
+```text
+now in our project we implemented kafka as well please verify the project once and also verify the README, ARCHITECTURE and AI_JOURNAL file is anything need to add and dont change the file diagram style if anything need to add please add and make the files simple wording to understand easyly
+```
+
+**What was found**
+
+1. **The README was an older copy.** The author's last commit ("add Minor modification") rewrote `ARCHITECTURE.md` and put back a `README.md` that still said 85 backend tests and 216 frontend tests, "Kafka has not been verified against a real broker", and had nothing about the
+   notification service, Mailpit, claim documents or the screenshots (the screenshot files were committed, but nothing showed them).
+2. **`ARCHITECTURE.md` pointed to three pictures that did not exist.** It shows `docs/diagrams/system-architecture.svg`, `transactional-outbox.svg` and `claim-lifecycle.svg`, but there was no `docs/diagrams` folder on the machine or in git history, so GitHub would show three broken images.
+3. **Old section letters were everywhere.** The rewritten `ARCHITECTURE.md` uses numbered sections 1 to 12, but the README, `DOCKER.md`, the four `CLAUDE.md` files and the journal still said "part E", "B.3", "B.10" and so on.
+4. **The notification service's default mode had changed.** The author's `application.properties` now defaults to `log` (print the email), and my earlier notes said the default was `smtp`. Docker Compose still sets `smtp`.
+5. **`ARCHITECTURE.md` was missing a few things it needs:** the event shape and the retry/dead-letter behaviour of the notification service in plain words, the "no currency" rule, why the UI keeps its own copy of the "who can do what" table, and several honest limitations (memory-only duplicate protection, nobody watching the dead-letter topic, email addresses on the topic).
+
+**What was done** (the diagram style was kept: Mermaid diagrams stay Mermaid, the image diagrams stay images)
+
+* **Re-checked everything from the committed state:** notification service, backend (in a scratch copy) and frontend, with fresh numbers (below).
+* **README:** brought up to date and kept the author's structure and both Mermaid diagrams. Only three nodes were added to the first diagram (notification service, mail inbox, dead-letter topic). Added: the screenshots, a new "Email notifications" section, the documents endpoints and rules, the form rules, current counts and the corrected Kafka/Docker status.
+* **`ARCHITECTURE.md`:** kept the author's layout and wording style. Added: fuller sections 4.3, 7.3 and 7.4 (with one Mermaid flowchart in the same colours as the existing one), new 10.5 (no currency) and 10.6 (UI rules table), testing results and the live run in 11, more rows in 12, and two more local addresses in Appendix A. The opening note was made simpler.
+* **The three diagrams:** created as SVG files at the exact paths the document already uses, in the same colour palette as the Mermaid diagram (people blue, frontend green, backend purple, storage amber, events pink). Each was opened in a browser; overlaps were found and fixed (a heading crossed by an arrow, two labels touching arrows). **If the author has their own versions, copying them over these three files is all that is needed.**
+* **Other documents:** every old section reference was replaced with the new number; `notification-service/CLAUDE.md` and `DOCKER.md` now say the default mode is `log` and that `EVENTS_PUBLISHER=log` means no emails; the journal got a short map from old section letters to new numbers and simpler opening text.
+
+**Corrections to my own work**
+
+1. My first version of the notification diagram in `ARCHITECTURE.md` used text arrows, which is a different style from the Mermaid diagrams in that file. I noticed before moving on and redrew it as Mermaid.
+2. My earlier documents had said the notification service sends by default. That was true when I wrote it and stopped being true when the author changed the default, so the claim was out of date. It was caught by reading the current `application.properties` instead of trusting my notes.
+
+**Verification (2026-10-26, from the committed state)**
+
+* **Notification service:** 76 tests, 0 failures; 99.0% of lines (200/202; only `main()` is not run), 88.6% of branches (78/88).
+* **Backend** (scratch copy, so the running app was untouched): 118 tests, 0 failures; 97.1% of lines (639/658), 86.9% of branches (133/153).
+* **Frontend:** 312 tests in 20 files, 0 failures; the production build is clean (315.83 kB first load).
+* **Documents:** 65 relative links and images across 8 documents were checked and all point to files that exist (one apparent anchor failure was my checker mishandling a dash, not a real problem). Each of the three SVG files is valid XML and was looked at in a browser. The image links from the README all resolve.
+* **Not verified:** the Mermaid diagrams I added or changed were not drawn here (no Mermaid renderer is available offline), so they follow the syntax of the existing ones but should be glanced at on GitHub. Docker Compose and the two new containers still have not been run. Nothing about a real mail provider has changed.
+
+**Decision:** `Pending author review`. *Proposed by the AI:* **ACCEPTED**, with these for the author to confirm: that the three SVGs I drew are acceptable stand-ins (or replace them with your own), that the screenshots belong back in the README, and that the section "10.6" and the extra limitations belong in `ARCHITECTURE.md`.
 
 ---
 
@@ -782,7 +826,7 @@ Backend:
 | Documents | Uploaded files are stored as BLOBs in the in-memory database (lost on restart, read fully into memory), are not virus-scanned, are typed by their first bytes only, and cannot be removed or replaced. Limits: 5 files of 5 MB per claim. |
 | Quality metrics | JaCoCo reports 97.1% line and 86.9% branch coverage (2026-10-26). It is a report, not a build gate, and there is no CI. |
 
-Frontend and integration (full table, with a next step for each, in `ARCHITECTURE.md` part E): no CORS on the backend, so the UI needs the dev
+Frontend and integration (full table, with a next step for each, in `ARCHITECTURE.md` section 12): no CORS on the backend, so the UI needs the dev
 proxy or a same-origin gateway; the action table is a copy of backend rules; no currency on claims; the JWT is kept in `localStorage`;
 officer approve/reject/settle and the manager assign picker were not clicked through in a browser (dark mode and phone width were looked at by eye on 2026-10-26); the
 real file-chooser dialog and drag-and-drop were not exercised; no browser-level automated tests.
@@ -796,7 +840,7 @@ These are the author's to write; the AI has not filled them in because it would 
 1. **Pre-existing commits.** The backend repository already had commits before the submission work (`Initial commit` to `pagination
    added`). State which parts were AI-generated, which were written by hand, and how they relate to the Phase 1 build.
 2. **F1 prompt text.** If an exact transcript is available, replace the clearly labelled reconstruction with it; otherwise keep the authenticity note.
-3. **Decisions for F1 to F10** are all `Pending author review`, each with a verdict *proposed by the AI*. Confirm or change every one in your
+3. **Decisions for F1 to F11** are all `Pending author review`, each with a verdict *proposed by the AI*. Confirm or change every one in your
    own words (one or two sentences: what you accepted, what you challenged or overrode, and why). **This is the part of the journal only you
    can write, and the part the brief asks for.**
 4. **F3 was reconstructed.** Read it and correct anything that does not match what you remember of that session.
@@ -817,18 +861,20 @@ These are the author's to write; the AI has not filled them in because it would 
 11. **Documents (F9).** Confirm the limits (5 files, 5 MB, PDF/JPG/PNG), that officers and managers can only read documents, and that there is no delete.
     Try the upload with real files through the browser's own file chooser and by drag-and-drop (the AI could only hand files to the form by script), and
     follow E2E steps 3.2A, 6.5A and 7.9 once. Decide whether the Postman collection should get the three new requests, and what you would say about
-    storing files in the database (the answer in `ARCHITECTURE.md` B.9 and part E: fine for an in-memory demo, object storage for real use).
+    storing files in the database (the answer in `ARCHITECTURE.md` sections 4.3 and 12: fine for an in-memory demo, object storage for real use).
 12. **Notifications (F10).** Run the Docker stack (`DOCKER.md` part 5.3A and 5.3B), look at the emails in Mailpit at http://localhost:8025, and write down what happened:
     the compose file and the two new containers have never been run. Try one real SMTP account through the `MAIL_*` variables. Confirm the decisions F10 lists (separate
     service; the claimant's address on the topic; in-memory duplicate protection), and decide whether the extra Maven build tooling that was downloaded is acceptable.
     Then follow E2E Part 13 once.
+13. **Final check (F11).** Look at the three diagrams in `docs/diagrams/` and at the Mermaid diagrams in the README and `ARCHITECTURE.md` on GitHub (they were not
+    drawn in this session). Replace the three SVGs with your own if you have them. Check the README still reads the way you want, since your last commit had replaced it.
 
 ---
 
 # Appendix: Template for New Entries
 
 ```markdown
-## F11: <short title>
+## F12: <short title>
 
 **Prompt** (verbatim, or "reconstructed prompt summary (not verbatim)"): <what was typed>
 

@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 540" width="1000" height="540" role="img" aria-labelledby="t d">
+  <title id="t">Transactional outbox flow</title>
+  <desc id="d">A claim status change saves the claim, a history row and an outbox row in one database transaction. Later a scheduled relay reads unpublished outbox rows oldest first and sends each event. If the broker accepts it, the row is marked published; if not, the row is left and retried.</desc>
+  <defs>
+    <marker id="solid" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="dash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#C6537C"/>
+    </marker>
+    <style>
+      text { font-family: "Segoe UI", Arial, sans-serif; fill: #1f2937; }
+      .title { font-size: 20px; font-weight: 700; }
+      .sub { font-size: 12.5px; fill: #475569; }
+      .h { font-size: 14px; font-weight: 700; }
+      .t { font-size: 12.5px; }
+      .lbl { font-size: 11.5px; fill: #475569; }
+      .lane { font-size: 13px; font-weight: 700; fill: #30215F; }
+      .backend { fill: #F0ECFF; stroke: #7861C8; stroke-width: 1.5; }
+      .storage { fill: #FFF3D9; stroke: #C88A21; stroke-width: 1.5; }
+      .events { fill: #FCE8F0; stroke: #C6537C; stroke-width: 1.5; }
+      .zone { fill: #FBFAFF; stroke: #7861C8; stroke-width: 1.2; }
+      .zone2 { fill: #FFF8FB; stroke: #C6537C; stroke-width: 1.2; }
+      .flow { stroke: #475569; stroke-width: 1.8; fill: none; marker-end: url(#solid); }
+      .async { stroke: #C6537C; stroke-width: 1.8; fill: none; stroke-dasharray: 7 5; marker-end: url(#dash); }
+    </style>
+  </defs>
+
+  <rect x="1" y="1" width="998" height="538" rx="14" fill="#FFFFFF" stroke="#D7DEEA"/>
+  <text x="30" y="38" class="title">Transactional outbox: save first, publish later</text>
+  <text x="30" y="60" class="sub">The claim and its event are saved together, so the database and the event stream can never disagree.</text>
+
+  <!-- lane 1 -->
+  <rect x="30" y="84" width="940" height="156" rx="12" class="zone"/>
+  <text x="50" y="108" class="lane">1. Inside one database transaction (when the status changes)</text>
+
+  <rect x="50" y="128" width="170" height="80" rx="10" class="backend"/>
+  <text x="135" y="160" text-anchor="middle" class="h">Claim service</text>
+  <text x="135" y="180" text-anchor="middle" class="t">checks the status change</text>
+  <text x="135" y="196" text-anchor="middle" class="t">is allowed</text>
+
+  <rect x="256" y="128" width="160" height="80" rx="10" class="storage"/>
+  <text x="336" y="160" text-anchor="middle" class="h">Update claim</text>
+  <text x="336" y="180" text-anchor="middle" class="t">new status, officer,</text>
+  <text x="336" y="196" text-anchor="middle" class="t">notes</text>
+
+  <rect x="440" y="128" width="160" height="80" rx="10" class="storage"/>
+  <text x="520" y="160" text-anchor="middle" class="h">Add history row</text>
+  <text x="520" y="180" text-anchor="middle" class="t">who, when, from and</text>
+  <text x="520" y="196" text-anchor="middle" class="t">to which status</text>
+
+  <rect x="624" y="128" width="160" height="80" rx="10" class="storage"/>
+  <text x="704" y="160" text-anchor="middle" class="h">Add outbox row</text>
+  <text x="704" y="180" text-anchor="middle" class="t">the event, as JSON,</text>
+  <text x="704" y="196" text-anchor="middle" class="t">not yet published</text>
+
+  <rect x="812" y="128" width="140" height="80" rx="10" class="backend"/>
+  <text x="882" y="160" text-anchor="middle" class="h">Commit</text>
+  <text x="882" y="180" text-anchor="middle" class="t">all three saved,</text>
+  <text x="882" y="196" text-anchor="middle" class="t">or none</text>
+
+  <path d="M220 168 H256" class="flow"/>
+  <path d="M416 168 H440" class="flow"/>
+  <path d="M600 168 H624" class="flow"/>
+  <path d="M784 168 H812" class="flow"/>
+
+  <!-- lane 2 -->
+  <rect x="30" y="284" width="940" height="176" rx="12" class="zone2"/>
+  <text x="170" y="308" class="lane">2. Later, on a schedule (every 5 seconds by default)</text>
+
+  <path d="M882 208 V262 H135 V328" class="async"/>
+  <text x="520" y="256" text-anchor="middle" class="lbl">the outbox row waits in the database</text>
+
+  <rect x="50" y="328" width="170" height="84" rx="10" class="events"/>
+  <text x="135" y="358" text-anchor="middle" class="h">Relay</text>
+  <text x="135" y="378" text-anchor="middle" class="t">reads unpublished rows,</text>
+  <text x="135" y="394" text-anchor="middle" class="t">oldest first</text>
+
+  <rect x="256" y="328" width="170" height="84" rx="10" class="events"/>
+  <text x="341" y="358" text-anchor="middle" class="h">Publisher</text>
+  <text x="341" y="378" text-anchor="middle" class="t">sends the event:</text>
+  <text x="341" y="394" text-anchor="middle" class="t">log (default) or Kafka</text>
+
+  <polygon points="520,322 600,370 520,418 440,370" class="events"/>
+  <text x="520" y="366" text-anchor="middle" class="h">Sent OK?</text>
+  <text x="520" y="384" text-anchor="middle" class="lbl">broker accepted it</text>
+
+  <rect x="690" y="324" width="250" height="52" rx="10" class="storage"/>
+  <text x="815" y="346" text-anchor="middle" class="h">Mark the row as published</text>
+  <text x="815" y="364" text-anchor="middle" class="t">it is never sent again</text>
+
+  <rect x="690" y="392" width="250" height="56" rx="10" class="events"/>
+  <text x="815" y="414" text-anchor="middle" class="h">Leave the row as it is</text>
+  <text x="815" y="432" text-anchor="middle" class="t">stop this batch, try again next time</text>
+
+  <path d="M220 370 H256" class="async"/>
+  <path d="M426 370 H440" class="async"/>
+  <path d="M600 370 L645 370 V350 H690" class="async"/>
+  <text x="624" y="344" text-anchor="middle" class="lbl">yes</text>
+  <path d="M600 370 L645 370 V420 H690" class="async"/>
+  <text x="624" y="436" text-anchor="middle" class="lbl">no</text>
+
+  <!-- note -->
+  <text x="30" y="486" class="h">Why this way</text>
+  <text x="30" y="506" class="t">If the app stops after sending but before marking the row, the event is sent again. This is "at least once" delivery, so every event has an eventId</text>
+  <text x="30" y="524" class="t">and the notification service skips an id it has already handled. Events of one claim stay in order because the claim id is the Kafka key.</text>
+</svg>
