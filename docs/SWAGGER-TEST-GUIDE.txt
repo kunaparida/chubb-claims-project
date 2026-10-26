@@ -417,8 +417,12 @@ STEP 32 Events
   publishedAt is now filled in.
   DESC: "By default events go to the log so the app runs without a
        broker. Setting app.events.publisher=kafka and
-       spring.kafka.bootstrap-servers publishes to Kafka instead. I
-       tested the Kafka publisher with a mock, not a real broker."
+       spring.kafka.bootstrap-servers publishes to Kafka instead, and the
+       separate notification service (notification-service/) reads that
+       topic and emails the claimant. The event carries claimantEmail and
+       claimantName for that purpose. The publisher is unit-tested with a
+       mock and was also run against a real broker started inside a JVM,
+       not against the Docker one."
 
 =====================================================================
  QUICK REFERENCE - ALL ENDPOINTS

@@ -1,4 +1,4 @@
-# Claims Platform: Kafka + backend + frontend.   Start with:  docker compose up --build -d
+# Claims Platform: Kafka + backend + notification service (+ a local inbox) + frontend.   Start with:  docker compose up --build -d
 # Full instructions: DOCKER.md
 name: chubb-claims
 
@@ -32,8 +32,10 @@ services:
       retries: 12
       start_period: 20s
 
-  # One-shot job: creates the topic the backend publishes to, then exits.
-  # Keep the topic name in sync with EVENTS_TOPIC below (the backend's default is the same name).
+  # One-shot job: creates the topics, then exits (auto-creation is off above).
+  #   claims.claim-status-changed       what the backend publishes and the notification service reads (EVENTS_TOPIC below)
+  #   claims.claim-status-changed.dlt   where the notification service parks a record it could not turn into an email (DEAD_LETTER_TOPIC below)
+  # Keep the names in sync with the environment of the two services (the defaults in their application.properties are the same names).
   kafka-init:
     image: apache/kafka:3.9.0
     container_name: claims-kafka-init
@@ -48,6 +50,10 @@ services:
         --create --if-not-exists
         --topic claims.claim-status-changed
         --partitions 3 --replication-factor 1
+        && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092
+        --create --if-not-exists
+        --topic claims.claim-status-changed.dlt
+        --partitions 1 --replication-factor 1
 
   backend:
     build:
@@ -82,6 +88,51 @@ services:
       timeout: 5s
       retries: 12
       start_period: 60s
+
+  # A local inbox for the notification service: it catches every email so you can read it at http://localhost:8025.
+  # Nothing is delivered to a real address. To send real email, point MAIL_HOST (and the MAIL_* variables below) at your own SMTP server.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: claims-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+
+  # Reads claim status events from Kafka and emails the claimant. Needs the backend to publish to Kafka (EVENTS_PUBLISHER=kafka, the default here).
+  notification-service:
+    build:
+      context: ./notification-service
+    container_name: claims-notification
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    restart: unless-stopped
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      EVENTS_TOPIC: claims.claim-status-changed
+      DEAD_LETTER_TOPIC: claims.claim-status-changed.dlt
+      # The address the "View your claim" link in each email points at (the claims web app as seen from your browser).
+      PORTAL_URL: ${PORTAL_URL:-http://localhost:4200}
+      # smtp sends through MAIL_HOST; "log" only writes the email to the container log.
+      NOTIFICATIONS_MAIL_MODE: ${NOTIFICATIONS_MAIL_MODE:-smtp}
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_FROM: ${MAIL_FROM:-Claims Platform <no-reply@claims.local>}
+      # Only for a real SMTP server. Put the password in your shell or a git-ignored .env file, never in this file.
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_AUTH: ${MAIL_AUTH:-false}
+      MAIL_STARTTLS: ${MAIL_STARTTLS:-false}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   frontend:
     build:

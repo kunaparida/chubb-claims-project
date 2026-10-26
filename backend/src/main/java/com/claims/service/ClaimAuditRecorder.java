@@ -46,7 +46,7 @@ public class ClaimAuditRecorder {
 
         ClaimStatusChangedEvent event = new ClaimStatusChangedEvent(UUID.randomUUID().toString(), claim.getId(),
                 claim.getClaimNumber(), claim.getClaimType(), claim.getMarket(), claim.getAmountClaimed(), from, to,
-                actor.getEmail(), Instant.now());
+                actor.getEmail(), Instant.now(), claim.getClaimantEmail(), claim.getClaimantName());
         outbox.save(new OutboxEvent(AGGREGATE_TYPE, claim.getId(), EVENT_TYPE, toJson(event)));
     }
 

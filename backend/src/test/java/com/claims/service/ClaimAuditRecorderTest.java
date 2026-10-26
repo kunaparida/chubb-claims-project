@@ -70,6 +70,27 @@ class ClaimAuditRecorderTest {
         assertEquals("officer@claims.local", event.changedBy());
         assertNotNull(event.eventId());
         assertNotNull(event.occurredAt());
+        // who to tell: the claim's claimant, not the officer who made the change
+        assertEquals("jane@example.com", event.claimantEmail());
+        assertEquals("Jane", event.claimantName());
+    }
+
+    @Test
+    void thePublishedJsonCarriesTheFieldsTheNotificationServiceReads() throws Exception {
+        ClaimAuditRecorder recorder = new ClaimAuditRecorder(history, outbox, objectMapper);
+        User officer = new User("officer@claims.local", "encoded", "Officer One", Role.OFFICER);
+
+        recorder.record(claim(officer), ClaimStatus.UNDER_REVIEW, ClaimStatus.APPROVED, officer, null);
+
+        ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outbox).save(captor.capture());
+        var json = objectMapper.readTree(captor.getValue().getPayload());
+        for (String field : List.of("eventId", "claimId", "claimNumber", "claimType", "market", "amountClaimed", "fromStatus",
+                "toStatus", "changedBy", "occurredAt", "claimantEmail", "claimantName")) {
+            assertTrue(json.has(field), "the event must keep the field " + field);
+        }
+        assertEquals("APPROVED", json.get("toStatus").asText());
+        assertEquals("jane@example.com", json.get("claimantEmail").asText());
     }
 
     @Test

@@ -257,7 +257,7 @@ item and either change the code to match this file or change this file to match 
 | Only the API is public: register, login, Swagger | The H2 console is **off by default** (`H2_CONSOLE_ENABLED`, `H2_CONSOLE_ALLOW_OTHERS` in `application.properties`). Only when it is on does `SecurityConfig` permit **`/h2-console/**` without a token** and set `X-Frame-Options: sameOrigin`; `ApiContractTest` checks it is unreachable otherwise. |
 | The whole API is reachable from any front end | **No CORS configuration.** A browser on another origin is blocked; the UI uses the Angular dev proxy (or nginx in Docker). |
 | (nothing about API documentation) | Controllers and DTOs carry OpenAPI annotations (`@Tag`, `@Operation`, `@ApiResponse`, `@Schema`). **Every endpoint needs a summary**; `ApiContractTest` fails otherwise and pins the endpoint count at 22. `POST /api/claims` returns `201` with a `Location` header. |
-| (nothing about coverage) | JaCoCo 0.8.15 runs with `mvn test` and writes `target/site/jacoco/index.html` (97.1% of lines, 117 tests, on 2026-10-26). It is a report, not a build gate. |
+| (nothing about coverage) | JaCoCo 0.8.15 runs with `mvn test` and writes `target/site/jacoco/index.html` (97.1% of lines, 118 tests, on 2026-10-26). It is a report, not a build gate. |
 
 ## Features added after this file's rules were written
 
@@ -267,7 +267,9 @@ item and either change the code to match this file or change this file to match 
   `ClaimAuditRecorder.record(...)` inside the same transaction.
 - Events: `ClaimStatusChanged` is written to the `outbox_events` table in the same transaction; `OutboxPublisher` relays it
   through `EventPublisher` (log by default, Kafka when `app.events.publisher=kafka`). Never publish to a broker directly
-  from a service.
+  from a service. The event also carries `claimantEmail` and `claimantName` (from the claim, not the actor) for the separate
+  `notification-service/`, which emails the claimant: treat the event as a contract (add fields only; `ClaimAuditRecorderTest` pins the names)
+  and as personal data (no officer notes, no extra fields).
 - `claimType` (MOTOR/PROPERTY) and `market` (2-letter code) are required on claim submission.
 - Optional claim documents: `POST|GET /api/claims/{id}/documents`, `GET .../documents/{documentId}` (`ClaimDocumentController`,
   `ClaimDocumentService`, entity `ClaimDocument`, table `claim_documents`, bytes in a `@Lob`). Rules, all in the service: only the owning

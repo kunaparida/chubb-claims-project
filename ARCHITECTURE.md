@@ -1,514 +1,326 @@
-# Claims Platform — Architecture and Design Decisions
+# Claims Management Platform — Architecture
 
-This document describes the implemented application structure, the main engineering choices, integration boundaries, and known gaps. It distinguishes current behaviour from recommended future work.
+> **Document status:** describes the current repository implementation and separates verified behaviour from intended or future behaviour. Review this document whenever code, configuration, or integration contracts change.
 
-A claims platform: claimants report and track incidents, officers work claims to a decision and settlement, managers see
-workload, liability and performance. It is delivered as **one repository with two applications** that meet at a single
-contract, the HTTP API.
+## Contents
 
-| Part | Covers |
-|---|---|
-| [A. System overview](#part-a-system-overview) | The two applications, how a request travels, who owns what |
-| [B. Backend](#part-b-backend) | Layers, domain model, workflow, sync vs event-driven, security, errors, tests |
-| [C. Frontend](#part-c-frontend) | Structure, routing, state, API layer, session, errors, the action table, tests |
-| [D. Integration decisions](#part-d-integration-decisions) | Contract ownership, dev proxy, who-can-do-what, officers, money, history |
-| [E. Known limitations and next steps](#part-e-known-limitations-and-next-steps) | Backend, frontend and whole-system gaps, each with a next step |
+- [1. System context](#1-system-context)
+- [2. Architecture principles and decisions](#2-architecture-principles-and-decisions)
+- [3. Application components](#3-application-components)
+- [4. Backend design](#4-backend-design)
+- [5. Domain model](#5-domain-model)
+- [6. Claim lifecycle](#6-claim-lifecycle)
+- [7. Synchronous API and asynchronous events](#7-synchronous-api-and-asynchronous-events)
+- [8. Security and authorization](#8-security-and-authorization)
+- [9. Frontend design](#9-frontend-design)
+- [10. Integration contracts](#10-integration-contracts)
+- [11. Testing and verification](#11-testing-and-verification)
+- [12. Limitations and evolution plan](#12-limitations-and-evolution-plan)
 
----
+## 1. System context
 
-## Part A: System overview
+The platform supports claim submission, assessment, decisions, settlement, supporting documents, operational dashboards, and email notifications. It is delivered as one repository containing three independently runnable applications.
 
-```
- Browser
-   │  http://localhost:4200
-   ▼
- Angular dev server (ng serve) ── serves the single-page app
-   │  relative calls:  /api/...
-   ▼
- Dev proxy (frontend/proxy.conf.json:  /api → http://localhost:8080)
-   │
-   ▼
- Spring Boot service :8080 ──► H2 in-memory database (PostgreSQL appears only as a commented example)
-   │                           outbox_events ─► scheduled relay ─► log (default) or Kafka
-   └─ Swagger UI / OpenAPI at /swagger-ui/index.html, /v3/api-docs
-```
+![System architecture](docs/diagrams/system-architecture.svg)
 
-| | Backend | Frontend |
-|---|---|---|
-| Folder | `backend/` | `frontend/` |
-| Stack | Java 21, Spring Boot 3.4.5, Spring Security + JWT, Spring Data JPA, H2, optional Kafka | Angular 22 (zoneless, signals, standalone components), RxJS, Vitest |
-| Owns | The API contract, every business rule, access control, audit history, events | Presentation, navigation, and a convenience copy of the "who can do what" rules |
-| Authority | **Final.** Every rule is enforced here | **None.** Guards and hidden buttons only steer; the server answers 403/404/409 regardless |
+### At a glance: how the platform works
 
-**The backend owns the contract.** The frontend was built against the finished backend's Swagger and README and never changes
-them. Where the backend lacks something the UI would like (CORS, an officers endpoint, "allowed actions", a currency), the UI works
-around it and the gap is written down in [part D](#part-d-integration-decisions) and [part E](#part-e-known-limitations-and-next-steps).
+The diagram below is designed for a quick client walkthrough. **Solid arrows** show the synchronous claim workflow; **dashed arrows** show the asynchronous notification path.
 
-**Container design (execution not yet verified).** `docker-compose.yml` is configured for three long-lived containers and one setup job: Kafka (single node, KRaft), the backend
-(`EVENTS_PUBLISHER=kafka`, same in-memory H2 database, H2 console off unless `H2_CONSOLE_ENABLED=true`, `restart: unless-stopped`), the frontend (nginx), and
-`kafka-init`, which creates the topic. In this layout nginx plays the role of the dev proxy: the browser only talks to port 4200 and nginx
-forwards `/api/` to the backend, so the backend's missing CORS configuration still does not matter (see D.2). Details and the Kafka
-configuration check are in [DOCKER.md](DOCKER.md). The available development record does not include a successful image build or container run (see `AI_JOURNAL.md`).
+```mermaid
+flowchart TB
+    %% User-facing layer
+    subgraph USERS[People and user interface]
+        C[Claimant]
+        O[Claims Officer]
+        M[Manager]
+        UI[Angular 22 Frontend
+Role-specific screens]
+        C --> UI
+        O --> UI
+        M --> UI
+    end
 
-**One app, three roles.** The brief asks for both user types to use the same Angular application. The JWT carries the role;
-the shell shows role-specific navigation and each page is behind a role guard.
+    %% Main application
+    subgraph CORE[Claims application — Spring Boot 3.4 · Java 21]
+        API[REST API + JWT Security]
+        SVC[Claim Services
+Validation · Workflow · Assignment]
+        AUD[Audit History]
+        OUT[Transactional Outbox]
+        API --> SVC
+        SVC --> AUD
+        SVC --> OUT
+    end
 
-### A.1 Decisions at a glance
+    DB[(H2 Database
+Claims · Users · Documents
+History · Outbox)]
+    RELAY[Scheduled Outbox Relay]
+    PUB[Event Publisher
+Logging by default / Kafka configurable]
+    K[(Kafka Topic
+claims.claim-status-changed)]
+    NS[Notification Service
+Kafka Consumer + Duplicate Protection]
+    SMTP[SMTP / Mailpit Inbox
+Claimant email notifications]
 
-The brief is deliberately underspecified, so the choices and the alternatives that were weighed are written down here; the sections
-named in the last column give the detail. "Revisit when" says what would change the answer.
+    UI -->|HTTPS/HTTP REST via /api proxy| API
+    SVC -->|Read / write| DB
+    AUD -->|Same transaction| DB
+    OUT -->|Same transaction| DB
+    DB -.->|Pending events| RELAY
+    RELAY -.-> PUB
+    PUB -.->|When Kafka mode is enabled| K
+    K -.-> NS
+    NS -.-> SMTP
 
-| Decision | Chosen | Alternatives considered | Why | Revisit when |
-|---|---|---|---|---|
-| Service boundaries | One modular monolith (B.1) | Separate claims, notification and reporting services | A claim, its history and its event must change in one transaction; one team and one bounded context | Notifications or reporting need their own scaling or release cycle (the event is the seam) |
-| REST or Kafka | Commands and reads over REST; one event per status change over Kafka (B.3) | Everything over REST; direct send to Kafka from the service | Callers need an immediate answer; consumers can be slow and must never fail a claim update | A consumer needs to react in real time with its own guarantees |
-| How events are produced | Transactional outbox plus a relay (B.3) | Send to Kafka inside the service call | Avoids lost or phantom events when the commit and the send disagree | Several instances run (add row locking or a dedicated relay) |
-| Status changes | One `PUT` command per transition (B.7) | One `PATCH /claims/{id}` with a target status | Each transition has its own rule, role and required note, and the server answers 409 if it is not allowed | The workflow becomes configurable |
-| Market | Validated two-letter code (B.2) | A `Market` enum | The list of markets is business data the code does not own | Markets need per-market rules or currencies |
-| Frontend shape | One Angular app, lazy-loaded role areas, one API service (C.1) | Micro-frontends (a shell with separately deployed remotes) | One team, one release, and the roles share the claim screens; federation would add build and runtime cost with nothing to gain at this size | Separate teams must release the claimant and staff areas independently |
-| Frontend state | Signals in components, one API service, a central action table (C.5) | NgRx or another store | State is per screen and short-lived; there is nothing shared enough to justify a store | Screens start sharing and mutating the same data |
-| Browser to backend | Same-origin: dev proxy, or nginx in Docker (D.2) | Adding CORS to the backend | The backend owns the contract and is not edited from the UI; same-origin also works unchanged behind a gateway | The SPA is served from another origin |
-| Database | In-memory H2, schema from Hibernate | PostgreSQL with migrations | No database server was available to the author (`AI_JOURNAL.md`, Prompt 3); keeps the project runnable with one command | Data must survive a restart (PostgreSQL, Flyway; part E) |
-| Claim documents (optional attachments) | Stored as a BLOB row next to the claim; the type is decided from the file's first bytes (B.9) | Files on disk; object storage (S3) with only a key in the database; trusting the browser's file type | There is no storage service here, a row keeps the file inside the claim's access rules and transaction, and a name or browser type can be faked | Files are larger or more numerous than a few MB per claim, or need scanning or retention rules (object storage plus a virus scan; part E) |
-
-**What was built and what was left out.** The time went first to the backend (all 22 endpoints, workflow rules, audit history, outbox,
-optional claim documents,
-dashboards, tests), then to a complete Angular UI for all three roles. Left out on purpose, each with a next step in part E: a persistent
-database and migrations, optimistic locking, a Kafka consumer (notifications), refresh tokens, browser-level end-to-end tests and an
-accessibility audit.
-
----
-
-## Part B: Backend
-
-### B.1 Shape of the system
-
-**One deployable service (modular monolith), layered.**
-
-```
-                  HTTPS + Bearer JWT
- Client ──────────────────────────────────► JwtAuthenticationFilter ► SecurityConfig
-                                                      │
-                          ┌───────────────────────────▼───────────────────────────┐
-                          │ controller  (role checks, validation, status codes)   │
-                          ├───────────────────────────────────────────────────────┤
-                          │ service     (transactions, business rules, state       │
-                          │              machine, ClaimAuditRecorder)              │
-                          ├───────────────────────────────────────────────────────┤
-                          │ repository  (Spring Data JPA, aggregate queries)       │
-                          └───────────────────────────┬───────────────────────────┘
-                                                      ▼
-                          H2 in-memory  (PostgreSQL: commented example only)
-                          tables: users, claims, claim_status_history, claim_documents, outbox_events
-                                                      │
-                  OutboxPublisher (scheduled) ────────┘──► EventPublisher
-                                                            ├─ LoggingEventPublisher (default)
-                                                            └─ KafkaEventPublisher (app.events.publisher=kafka)
+    classDef people fill:#EAF2FF,stroke:#4777C7,color:#17345E,stroke-width:1.5px;
+    classDef frontend fill:#E8F7F1,stroke:#24936E,color:#124D3B,stroke-width:1.5px;
+    classDef backend fill:#F0ECFF,stroke:#7861C8,color:#30215F,stroke-width:1.5px;
+    classDef storage fill:#FFF3D9,stroke:#C88A21,color:#6E4708,stroke-width:1.5px;
+    classDef events fill:#FCE8F0,stroke:#C6537C,color:#6E2340,stroke-width:1.5px;
+    class C,O,M people;
+    class UI frontend;
+    class API,SVC,AUD,OUT backend;
+    class DB storage;
+    class RELAY,PUB,K,NS,SMTP events;
 ```
 
-Packages (`com.claims`): `controller`, `service`, `repository`, `entity`, `dto`, `mapper`, `security`, `config`,
-`exception`, `validation`, `util`, `event`.
+**Client explanation:** Users work through the Angular screens. The Spring Boot API authenticates the user and applies claim rules. Claim changes, audit history, and an outbox event are saved together in one database transaction. The relay then publishes the event asynchronously; when Kafka mode is enabled, the notification service consumes it and sends the email. H2 is currently in-memory, so its data resets when the backend restarts.
 
-#### Why one service, not several
-| Driver | Assessment |
-|---|---|
-| Consistency | A claim, its status, its assignee, its history and its outgoing event must change atomically. One database transaction gives that for free; separate services would need sagas. |
-| Size and team | One bounded context ("claim lifecycle"), one team, a 2-3 hour budget. |
-| Scaling | No evidence yet that any part needs independent scaling. |
-| Operations | One artefact to build, run and debug. |
 
-**Where I would split first, and why:** *notifications* and *reporting/dashboards*. They only need to know that a claim
-changed, they tolerate seconds of delay, and dashboards have a different read profile (large aggregates) from claim
-writes. The seam already exists: the `ClaimStatusChanged` event.
+### 1.1 Applications and ownership
 
-### B.2 Domain model
-
-```
-users ─┬─< claims >─┬─< claim_status_history
-       │            ├─< claim_documents (uploaded_by_id → users)
-       │            └─ (assigned_officer_id → users)
-       └─ (claimant_id → users)                    outbox_events (aggregate = Claim, id = claim id)
-```
-
-| Entity | Key fields |
-|---|---|
-| `User` | email (unique), password hash, fullName, role (CLAIMANT / OFFICER / MANAGER) |
-| `Claim` | claimNumber (unique), policyNumber, claimant details, incidentDate, description, amountClaimed, **claimType** (MOTOR / PROPERTY), **market** (2-letter code), status, claimant, assignedOfficer, informationRequest, **informationResponse**, decisionNotes, timestamps |
-| `ClaimStatusHistory` | claim, fromStatus (null for the first record), toStatus, changedBy, note, changedAt: append-only audit trail |
-| `ClaimDocument` | claim, fileName (directories stripped), contentType (decided from the file's contents), sizeBytes, the bytes (`@Lob`), uploadedBy, uploadedAt: an optional attachment, at most 5 per claim |
-| `OutboxEvent` | aggregateType, aggregateId, eventType, JSON payload, createdAt, publishedAt (null = not yet published) |
-
-`market` is a validated 2-letter code, not an enum, because the list of markets is business data I do not own.
-
-#### Claim lifecycle (state machine)
-
-```
-SUBMITTED ──► UNDER_REVIEW ──► APPROVED ──► SETTLED
-                  │  ▲
-                  ▼  │
-          MORE_INFO_REQUIRED          UNDER_REVIEW ──► REJECTED
-```
-Allowed: `SUBMITTED→UNDER_REVIEW`, `UNDER_REVIEW→MORE_INFO_REQUIRED|APPROVED|REJECTED`, `MORE_INFO_REQUIRED→UNDER_REVIEW`,
-`APPROVED→SETTLED`. `REJECTED` and `SETTLED` are terminal. Anything else is `409 Conflict`.
-The rules live in one table in `ClaimService`. `MORE_INFO_REQUIRED → UNDER_REVIEW` is triggered by the **claimant**
-(`provide-info`) or by an officer (`review`).
-
-Picking up or assigning a claim sets the officer only: the status stays `SUBMITTED` until the officer calls `review`.
-
-### B.3 What is synchronous (REST) and what is event-driven
-
-| Concern | Style | Reason |
-|---|---|---|
-| Submit, read, list, queue, pick up, assign | REST (sync) | Caller needs an immediate, consistent answer. |
-| Every status change (review, request-info, provide-info, approve, reject, settle) | REST (sync) command | Must validate against current state and answer success or conflict. |
-| "A claim changed status" | **Event** (`ClaimStatusChanged`) | Consumers (claimant notifications, reporting, audit exports) are asynchronous, can fail and retry independently, and must never slow or fail the claim update. |
-| Dashboards | REST read | Aggregate queries today; first candidate for a read model if volume grows. |
-
-#### Outbox pattern (how events are produced)
-1. In **one database transaction** the service updates the claim, appends a `claim_status_history` row and inserts an
-   `outbox_events` row (`ClaimAuditRecorder`, `Propagation.MANDATORY`).
-2. A scheduled `OutboxPublisher` reads unpublished rows oldest-first and calls `EventPublisher.publish(topic, claimId, json)`.
-3. Only after a successful publish is `publishedAt` set. A failure stops the batch (keeps order) and the row is retried.
-
-Guarantees and limits:
-- **No lost events and no phantom events:** the event exists if and only if the status change committed.
-- **At-least-once delivery:** a crash between send and commit re-sends the row. Consumers de-duplicate on `eventId`.
-- **Ordering per claim:** Kafka record key is the claim id, so one claim's events stay in one partition, in order.
-- **Default publisher** logs the event, so the app runs with no broker. `app.events.publisher=kafka` plus
-  `spring.kafka.bootstrap-servers` switches to Kafka (`KafkaEventPublisher` waits for the broker acknowledgement).
-
-Event contract (`claims.claim-status-changed`, JSON):
-```json
-{"eventId":"uuid","claimId":1,"claimNumber":"CLM-...","claimType":"PROPERTY","market":"HK",
- "amountClaimed":1250.00,"fromStatus":"UNDER_REVIEW","toStatus":"APPROVED",
- "changedBy":"officer@claims.local","occurredAt":"2026-10-14T06:45:17Z"}
-```
-`fromStatus` is null for the initial submission.
-
-### B.4 Read/write profile and what officers need
-- **Writes** are low volume, transactional, per claim. **Reads** are dominated by lists and dashboards.
-- Officers need: *what is waiting* (`GET /api/claims/queue`: unassigned `SUBMITTED`, oldest first), *what is mine*
-  (`GET /api/claims`, optional `?status=`), and *what happened* (`GET /api/claims/{id}/history`).
-- Indexes: explicit indexes exist on `claim_status_history.claim_id` and `outbox_events.publishedAt`. H2 indexes foreign
-  keys automatically; **on PostgreSQL I would add explicit indexes** on `claims(claimant_id)`, `claims(assigned_officer_id)`
-  and `claims(status)`, because the list, queue and dashboard queries filter on them.
-- Managers: workload (counts per status, unassigned), liability (pending exposure and approved-not-settled, **broken down
-  by claim type and market**) and officer performance, all computed by the database.
-
-### B.5 Security model
-JWT (HS256) in `Authorization: Bearer`, stateless; BCrypt passwords; method security with `@PreAuthorize`; RFC 7807
-`application/problem+json` for every error including 401 and 403.
-
-| Endpoint | CLAIMANT | OFFICER | MANAGER |
+| Component | Technology | Responsibility | Authority |
 |---|---|---|---|
-| `POST /api/claims` | yes (own account email) | no | no |
-| `GET /api/claims`, `GET /api/claims/{id}` | own claims | assigned claims; may open unassigned (queue) claims | all |
-| `GET /api/claims/queue` | no (403) | yes | yes |
-| `PUT .../pickup` | no | yes | no |
-| `PUT .../assign` | no | self only | any officer |
-| `PUT .../review`, `request-info`, `approve`, `reject`, `settle` | no | assigned officer | yes |
-| `PUT .../provide-info` | owner, only when info requested | no | no |
-| `GET .../history` | own claims | same as view | all |
-| `POST .../documents` | owner, while the claim is open | no (403) | no (403) |
-| `GET .../documents`, `GET .../documents/{id}` | own claims | same as view | all |
-| `GET /api/dashboard/*` | no | no | yes |
+| `frontend/` | Angular 22, TypeScript, RxJS, signals | Screens, navigation, role-specific workflows, API calls | Presentation only; backend decisions are authoritative |
+| `backend/` | Java 21, Spring Boot 3.4.5, Spring Security, JPA, H2 | API contract, claim rules, access control, persistence, audit history, outbox | Source of truth for claims |
+| `notification-service/` | Java 21, Spring Boot, Spring Kafka, Spring Mail | Consume status-change events and email claimants | Does not own claims or call the claims API |
+| Kafka | Event broker when configured | Carry status-change events to consumers | Transport, not business authority |
+| Mailpit / SMTP | Local SMTP and inbox in the Compose configuration | Capture or deliver notification email according to configuration | External delivery boundary |
 
-Other claimants' or officers' claims return **404**, not 403, so existence is not leaked. Public registration can only
-create claimants.
+### 1.2 Request and event paths
 
-Reachable **without an application token**: `POST /api/auth/register` and `/login`, Swagger UI and the OpenAPI document, and `/error`.
-The **H2 console** is **off by default**: `SecurityConfig` adds its `/h2-console/**` rule (and the same-origin frame setting it needs) only when
-it is switched on with `H2_CONSOLE_ENABLED=true`, and a test checks that it is unreachable otherwise. When it is on it needs no sign-in, so anyone
-who can reach the port can read and change the database; use it only on your own machine.
+**Synchronous request:** browser → Angular application → `/api` proxy → Spring Boot API → service/business rules → repository → H2.
 
-### B.6 Error model
-RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map for field validation.
-`400` validation or bad input, `401` no/invalid token, `403` role or ownership, `404` not found or not visible,
-`405` wrong method, `409` invalid state transition or conflict, `413` an uploaded file over the size limit, `415` wrong content type or a
-file that is not a PDF, JPG or PNG, `500` generic (details only in logs).
+**Asynchronous notification:** status change → outbox row in the same transaction → scheduled relay → configured event publisher → Kafka → notification service → SMTP inbox.
 
-### B.7 API conventions
-- **Commands, not a generic status patch.** Each transition is its own `PUT /api/claims/{id}/<command>` (`review`, `request-info`,
-  `approve`, `reject`, `settle`, `provide-info`, `pickup`, `assign`). The server checks the command against the claim's current status
-  (one table in `ClaimService`), the caller's role and assignment, and the required note, and answers `409` when the transition is not
-  allowed. A repeated command is retry-safe in effect: a transition answers `409` and changes nothing because the claim has already moved
-  on (an officer picking up a claim already assigned to them simply succeeds again).
-- **Create returns `201` with a `Location` header** pointing at the new claim (`/api/claims/{id}`); a test checks the header and that the
-  address works.
-- **Lists are paged** (`page`, `size`, newest first; the officer queue oldest first) and role-scoped by the server, never by the client.
-- **One error shape** (RFC 7807, B.6) with a field-to-message map on `400`; `404` instead of `403` for claims the caller may not see.
-- **Documents are a sub-resource of the claim** (`/api/claims/{id}/documents`, B.9): one file per `POST` as `multipart/form-data`, a details-only
-  list, and a download that is sent as an attachment. Visibility is the claim's visibility, so there is no second set of rules to drift.
-- **Documented in OpenAPI.** Every endpoint has a summary, a description of who may call it and what it does to the status, and its error
-  responses; request bodies carry examples so Swagger's "Try it out" is pre-filled with valid values. `ApiContractTest` fails if an endpoint
-  is added without a summary. The document is served at `/v3/api-docs` and the UI at `/swagger-ui/index.html`.
+The frontend development server proxies `/api` to port `8080`. The Docker configuration uses nginx as the corresponding same-origin proxy. This avoids cross-origin browser calls in the current setup; the backend itself has no CORS configuration.
 
-### B.8 Testing strategy
-- Unit tests with Mockito for services, the audit recorder, the outbox relay and the publishers.
-- Validation tests for request rules (policy, amount, future date, description length, claim type, market).
-- Spring Boot integration tests on H2: the original role/workflow flow, the lifecycle extensions (queue, pick-up, claimant answer,
-  history, filter, outbox, liability breakdown), and `ApiContractTest` (the `Location` header, the H2 console closed by default, every
-  endpoint documented).
-- Documents: service tests (the signature check, a name that contradicts the contents, empty, oversized and nameless files, the exact size
-  limit, who may attach, closed claims, the file-count limit, the cleaned file name) and MockMvc integration tests on H2 (attach, list and
-  download; plain and accented file names in `Content-Disposition`; another claimant, staff and anonymous callers; a missing file part;
-  the sixth file; a rejected claim that keeps the documents it has).
-- Wiring tests prove the publisher is chosen by configuration.
-- Postman collection (`backend/postman/`) replays the same flow, with assertions, in collection order. It was **not** extended for the
-  documents endpoints (Swagger and the integration tests cover them).
-- **Coverage is measured, not assumed:** `mvn test` runs JaCoCo and writes `backend/target/site/jacoco/index.html`. On 2026-10-26
-  (JDK 21, JaCoCo 0.8.15, 117 tests): **97.1% of lines (639/658), 96.9% of instructions, 86.9% of branches (133/153)**. It is a report, not a
-  build gate; the lowest are the application's main class, `config` (91.5%) and `security` (93.9%). Coverage shows what ran, not that it was asserted well, so
-  the role matrix and the workflow are also exercised by the Postman run and the manual script in `docs/`.
+### 1.3 Runtime and validation status
 
-### B.9 Claim documents
+| Item | Current state |
+|---|---|
+| Backend and frontend local development | Run using the commands in `README.md` |
+| H2 persistence | In-memory; all data resets on backend restart |
+| Kafka publisher | Default is logging; Kafka can be enabled by configuration |
+| Notification integration | Backend, notification service, Kafka broker, and SMTP server were run together outside Docker on 2026-10-26 |
+| Docker Compose | Configuration exists; the available record does not establish a successful full Compose run |
+| Production readiness | Not claimed; see [Section 12](#12-limitations-and-evolution-plan) |
 
-A claimant may attach supporting files (photos, a repair estimate, a report) when reporting an incident or later. It is optional and never
-blocks a claim. All the rules are in `ClaimDocumentService`; the controller only translates HTTP.
+## 2. Architecture principles and decisions
 
-| Rule | Value | Failure |
-|---|---|---|
-| Who may attach | the claimant who owns the claim; officers and managers are read-only | `403` (another claimant's claim is `404`) |
-| When | any open status; closed once the claim is `REJECTED` or `SETTLED` | `409` |
-| How many | at most 5 per claim (`app.documents.max-files`) | `409` |
-| How big | at most 5 MB each (`app.documents.max-bytes`); an empty file is refused | `413`, `400` |
-| What type | PDF, JPG or PNG, **decided from the file's first bytes**, and the extension must agree (`.pdf` / `.jpg` `.jpeg` / `.png`) | `415` |
-| The name | directories and control characters removed, at most 255 characters | `400` |
+| Decision | Choice | Rationale | Revisit when |
+|---|---|---|---|
+| Claims backend shape | Layered modular monolith | Claim, history, assignment and outbox must be consistent; one deployable API is simpler to develop and operate for the current scope | Different capabilities need independent release or scaling |
+| API interaction | REST for commands and queries | Callers need immediate validation and a definitive HTTP result | A separate asynchronous command contract becomes necessary |
+| Status events | Transactional outbox and relay | Prevents the database commit and event publication from silently disagreeing | Multiple backend instances require relay coordination or row locking |
+| Notification delivery | Separate consumer service | Email latency or failure should not block claim updates | Additional channels or preferences need their own persistence |
+| Database | In-memory H2 | Keeps the project runnable without an external database service | Persistent data, operational recovery, or concurrent deployment is required |
+| Market | Validated two-letter code | The application does not own a fixed master list of markets | Market-specific rules, currencies, or reference data are required |
+| Frontend | One Angular app with role-specific areas | All roles share the claim domain and API; a separate frontend deployment is not currently justified | Separate teams need independent release cycles |
+| File storage | Document bytes in the database | Keeps files inside the claim access model without a separate storage service | File volume, scanning, retention, or size requirements increase |
 
-Why the first bytes: a name or the browser's reported type can be anything, so a script renamed `estimate.pdf` is refused because it does not
-begin with `%PDF-`. Downloads are sent as an attachment with `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`, so a browser
-saves the file instead of running it and does not keep a copy. The web server also limits the request (`spring.servlet.multipart.*`,
-`server.tomcat.max-swallow-size`) so an oversized upload is answered with a clean `413` instead of a reset connection.
+## 3. Application components
 
-Files are stored as a `@Lob` column in `claim_documents`, which suits the in-memory H2 database and keeps a file inside the claim's own
-access rules; a real deployment would put the bytes in object storage and keep only a key (part E).
+### 3.1 Repository layout
 
----
-
-## Part C: Frontend
-
-### C.1 Structure
-
-```
-frontend/src/app/
-  core/       models.ts            API types, mirrored from the backend (no `any`)
-              api.service.ts       the ONLY file that knows URLs: one method per endpoint (22)
-              auth.service.ts      session signal, login / register / logout, GET /api/auth/me re-validation
-              auth.interceptor.ts  bearer token on /api/ calls; 401 → sign out
-              guards.ts            authGuard, roleGuard(...), homeRedirectGuard
-              problem.ts           HTTP error → one human-readable message
-              claim-actions.ts     THE action table: who can do what to a claim
-              claim-progress.ts    the four stages shown on a claim page (presentation only, grants nothing)
-              markets.ts           the six markets the report form offers
-              dates.ts             the 7-day incident window, "3 h ago" labels
-              policy-number.ts     the generated policy reference
-              documents.ts         the attachment limits (5 files, 5 MB, PDF/JPG/PNG) and the check that explains a refused file
-              save-file.ts         saves a downloaded Blob (the only code that touches the DOM to do so)
-              flash.ts             one message for the next page to show once (e.g. what happened to the documents after submitting)
-  shared/     status-badge.ts, amount.pipe.ts, icon.ts (SVG icons), logo.ts (brand mark), auth-shell.ts (sign-in frame)
-  shell/      signed-in frame (header, role navigation, user chip)
-  features/   login · register · claims (list, new-claim, claim-detail) · queue · dashboard
-  styles.css  the design system: tokens, light and dark themes, every shared component class
-  testing.ts  fixtures used only by specs (excluded from the app build)
+```text
+.
+├── backend/                 Spring Boot REST API and business rules
+├── frontend/                Angular single-page application
+├── notification-service/    Kafka consumer and email delivery
+├── docs/                    Validation guides and architecture diagrams
+├── docker-compose.yml       Intended local container topology
+├── DOCKER.md                Container setup and validation guide
+├── README.md                Entry point and local run instructions
+├── ARCHITECTURE.md           System design and trade-offs
+├── AI_JOURNAL.md             AI assistance and verification record
+└── CLAUDE.md                 Repository-level contributor guidance
 ```
 
-| Decision | Reason |
+### 3.2 Backend layers
+
+![Transactional outbox flow](docs/diagrams/transactional-outbox.svg)
+
+| Layer | Responsibility |
 |---|---|
-| Standalone components, `inject()`, signals, functional guards and interceptors, no NgModules | Current Angular style; less boilerplate; state changes drive the view without change-detection plumbing. |
-| **Zoneless** (`provideBrowserGlobalErrorListeners()`, no `zone.js`) | Smaller bundle, and signals already tell Angular when to re-render. |
-| One lazy-loaded chunk per page | The claimant never downloads the dashboard code. Initial bundle is about 316 kB (86 kB over the wire); each page is a separate chunk. |
-| File names without the `.component` suffix (`claim-detail.ts`) | The current Angular CLI convention; selector prefix `app`. |
+| Security and configuration | JWT authentication, password hashing, security rules, application settings |
+| Controllers | HTTP contract, request/response mapping, authorization annotations, status codes |
+| Services | Transactions, validation of business rules, state transitions, assignment, audit recording |
+| Repositories | Spring Data JPA persistence and aggregate queries |
+| Entities | Users, claims, history, documents, and outbox events |
+| Event publishing | Scheduled relay and configured logging or Kafka publisher |
 
-### C.2 Routes and role landing pages
+Package areas under `com.claims` include `controller`, `service`, `repository`, `entity`, `dto`, `mapper`, `security`, `config`, `exception`, `validation`, `util`, and `event`.
 
-| Route | Who | Page |
-|---|---|---|
-| `/login`, `/register` | public | Sign in (a demo-accounts panel fills in the seeded emails); create a claimant account |
-| `/claims` | any signed-in role | Role-scoped list: claimant = mine, officer = assigned to me, manager = all |
-| `/claims/new` | claimant | Report an incident: name and email from the session, market from a list of six, incident date limited to the last 7 days, policy number generated, optional documents, and a plain-language message for every missing or invalid field (C.7) |
-| `/claims/:id` | any (server decides visibility) | Detail, documents (download for everyone who can see the claim; "Add documents" for the owning claimant while the claim is open), status history, and the actions the viewer may take |
-| `/queue` | officer, manager | Unassigned submitted claims, oldest first; pick up (officer) or assign (manager) |
-| `/dashboard` | manager | Workload, liability by market, officer performance |
+## 4. Backend design
 
-After sign-in a claimant lands on `/claims`, an officer on `/queue`, a manager on `/dashboard`. Route guards (`authGuard`,
-`roleGuard`) are navigation conveniences; **the API is what enforces access.**
+### 4.1 API and transaction boundaries
 
-### C.3 API layer and errors
+Controllers expose the REST contract. Services enforce business rules and own transactional operations. Repositories persist the state. A claim status transition records the updated claim, an audit-history row, and an outbox event within the same database transaction.
 
-* **`ApiService` is the only code that builds a request.** It uses relative `/api/...` URLs only (see [D.2](#d2-no-cors-so-a-dev-proxy)). Components call
-  methods and receive typed observables.
-* **One error helper (`problem.ts`)** turns a failure into a message: the RFC 7807 `detail` if present; the joined `errors` map for a
-  400; "cannot reach the server" for status 0 *and* for 502/503/504, because the dev proxy answers 502 with an empty body when the
-  backend is down; a generic fallback otherwise. No stack traces or JSON ever reach the screen. A failed *download* arrives as a Blob (the
-  request asked for one), so `readBlobProblem` reads the explanation back out of it before the helper runs.
-* **Every screen has loading, empty and error states**, and submit buttons are disabled while a request is in flight.
+### 4.2 Error handling
 
-### C.4 Session
+Errors use RFC 7807-style `application/problem+json` responses. Invalid workflow transitions return `409 Conflict`; authentication and authorization failures return `401` and `403` where appropriate. Claims that a user is not permitted to view return `404` to avoid disclosing their existence.
 
-The session (`token`, user, `expiresAt = login time + expiresIn`) is held in a signal and mirrored to `localStorage` (key
-`claims.ui.session`), every storage access wrapped in `try/catch`. An expired session is dropped on load. On start-up the shell
-calls `GET /api/auth/me` to re-validate: a token the server no longer accepts ends the session instead of showing a broken
-page. The interceptor attaches `Authorization: Bearer ...` to `/api/` URLs only, never to login or register and never to
-another origin; a 401 from any other call signs the user out and returns to `/login` (a 401 *from* login simply means wrong
-credentials).
+### 4.3 Claim documents
 
-### C.5 The action table (who can do what)
+Claimants may attach up to five files to an open claim, with a 5 MB limit per file. Accepted formats are PDF, JPG, and PNG. The backend determines file type from the file content rather than trusting the filename or browser-provided content type. Documents are stored in the H2 database and are lost on restart.
 
-The backend does not return "allowed actions", so `core/claim-actions.ts` is the single place that decides which buttons a viewer
-sees. It is a mirror of the backend's `ClaimService` rules:
+## 5. Domain model
 
-| Viewer | Claim state | Offered |
-|---|---|---|
-| Claimant (owner) | `MORE_INFO_REQUIRED` | provide information |
-| Officer | `SUBMITTED`, unassigned | pick up |
-| Officer, claim assigned to them | `SUBMITTED` | start review |
-| | `UNDER_REVIEW` | request info, approve, reject |
-| | `MORE_INFO_REQUIRED` | resume review |
-| | `APPROVED` | settle |
-| Manager | any non-terminal claim | assign to an officer; plus the same status actions as an officer, no assignment needed |
-| Anyone | `REJECTED`, `SETTLED` | nothing (terminal) |
-
-Rules for this table: no role or status `if` statements in templates; a spec checks every role × status combination against the
-backend workflow; and because the table is only a convenience, every action still handles 403, 404 and 409 by showing the server's
-`detail` and reloading the claim.
-
-The same file answers one more question, `canAddDocuments(claim, viewer)`: true only for the claimant who owns the claim while it is not
-`REJECTED` or `SETTLED`, which is what the backend allows (B.9). It is tested against every role and status, like the table above.
-
-### C.6 Money
-
-The backend has **no currency field**: `amountClaimed` is a bare number and `market` is a 2-letter code. So every amount is shown
-with its market (`amount` pipe), the dashboard leads with the per-market lines, and the grand totals (which the backend adds
-across markets) are labelled **"unconverted, mixed markets"**. No exchange rates are invented.
-
-### C.7 The report form's own rules, and the look of the app
-
-**Rules that live only in the UI.** The report form is more restrictive than the API, on purpose, and each rule is one small file with its own
-spec:
-
-| Rule | Where | What the backend does |
-|---|---|---|
-| Market chosen from six (SG, HK, IN, MY, TH, ID) | `core/markets.ts` | Accepts any two-letter code. The brief says there are six markets but does not name them, so this list is an assumption |
-| Incident date from 7 days ago to today | `core/dates.ts` | Refuses only future dates |
-| Policy number generated as `POL-<year>-<six digits>` | `core/policy-number.ts` | Accepts any non-blank value up to 64 characters |
-
-**Saying what is wrong.** A submit with missing or invalid required fields does not fail silently: each field shows its own message
-(for example "Select the market the claim relates to.", "Describe what happened in at least 20 characters (you have written 7).") with
-`aria-invalid` and `aria-describedby`, an error summary at the top (`role="alert"`) lists them as links in form order, and focus moves to
-the first field to fix. A message from the server (a 400 field map) is shown against its field the same way.
-
-**Documents on the form** are optional. A file is checked as soon as it is chosen (type, 5 MB, 5 files, empty, duplicate) and a refused
-file is listed with the reason while the valid ones stay; the form never blocks on them. The files are sent after the claim exists, one
-request each, because the claim must exist before it can own a document. If some fail, the claim is still submitted: the claim page opens
-with a warning saying how many could not be attached and that they can be added there. The same limits are in `core/documents.ts`, a copy of
-the backend's (C.5's caveat applies: the server has the last word and checks the real file type).
-
-"Today" is the earlier of the viewer's date and the UTC date, because the backend judges "not in the future" by its own clock and a
-container usually runs on UTC; the first hours of an Asian morning therefore cannot pick "today". These rules are conveniences like the
-action table (C.5): a different client could bypass them, so a business rule that must hold (such as the 7-day limit) would have to move to
-the backend.
-
-**Look and feel.** One global stylesheet (`styles.css`) holds the design tokens (colour, radius, shadow) and every shared class, so pages carry
-no styles of their own. Light and dark themes follow the operating system (`prefers-color-scheme`); the layout is responsive down to a phone
-(the header collapses to icons and a scrolling navigation row, tables scroll sideways); the logo and icons are inline SVG drawn for the
-project, so there is no UI library and the app itself requests no image or font. Status is never colour alone: badges carry a label, and the
-claim stages carry a number or mark. Screenshots are in the README and in `docs/screenshots/`.
-
-### C.8 Testing strategy
-
-* **Vitest** (via `@angular/build:unit-test`, jsdom), **312 tests** across 20 spec files.
-* The API service is tested with `HttpTestingController` for every endpoint's verb, path and body; the interceptor, guards, error
-  helper, session handling and the action table are tested as pure units; each page is tested through `TestBed` (rendering, the
-  actions it offers, and failure handling).
-* Beyond unit tests: a scripted run of the full lifecycle against the **real backend** through the dev proxy (45 checks, with the
-  numbers used in `docs/E2E-VALIDATION-FLOW.txt`) and a manual browser walkthrough (register, report, pick up, review, request info,
-  answer, dashboard), plus a look at the redesigned screens in a browser in light mode, dark mode and at phone width (2026-10-26). See
-[AI_JOURNAL.md](AI_JOURNAL.md) for what was and was not checked.
-
----
-
-## Part D: Integration decisions
-
-### D.1 The backend owns the contract
-
-The frontend mirrors the API shapes exactly (`core/models.ts`): numeric ids, ISO date and instant strings, a 0-based page
-(`PageResponse<T>`), RFC 7807 problems. If the UI and the backend ever disagree, the backend (Swagger and its README) wins and the UI
-is fixed. The UI never edits the backend.
-
-### D.2 No CORS, so a dev proxy
-
-The backend has no CORS configuration, so a browser on port 4200 calling port 8080 directly is blocked. The frontend therefore
-calls **relative** `/api/...` URLs and the Angular dev server proxies them (`frontend/proxy.conf.json`, wired into
-`angular.json`). It is not a workaround to hide: the same relative URLs work unchanged behind any same-origin reverse proxy or
-gateway in production, which is the recommended deployment. Adding CORS to the backend is the alternative if the SPA is ever
-served from another origin.
-
-### D.3 Status changes are commands, not edits
-
-Each transition is its own `PUT` (`review`, `request-info`, `approve`, ...), and the UI offers exactly those that the action table
-allows for the viewer. `pickup` and `assign` set the officer only, so after picking up, a claim is still `SUBMITTED` and the officer
-must press *Start review*; the UI says so rather than pretending the claim moved.
-
-### D.4 No "list officers" endpoint
-
-The manager's assign picker is populated from `GET /api/dashboard/performance`, which returns every officer (`officerId`,
-`officerName`) including those with no claims. A dedicated read-only officers endpoint would be cleaner (see part E).
-
-### D.5 Notes and history
-
-`note` is mandatory (not blank, at most 2000 characters) for request-info, approve, reject and settle; review and pickup take no
-body. The claim holds only the **latest** decision note: settling overwrites the approval note in `decisionNotes`. The full
-sequence of notes is in `GET /claims/{id}/history`, which the claim page shows as the timeline, so the UI shows both.
-Claimants see the officer's information request, the decision, and the history of their own claim only.
-
-### D.6 Identity on submit
-
-`claimantEmail` on `POST /api/claims` must equal the signed-in account's email, so the new-claim form prefills it (and the
-name) from the session and the backend rejects a mismatch.
-
-### D.7 Consistent error and status semantics
-
-`401` = session invalid, so sign out. `403` = not allowed. `404` = not found **or not yours** (the backend does not say which, so
-the UI cannot either). `409` = invalid transition or already assigned. `400` = per-field `errors`. In every case the server's
-`detail` is shown when there is one; otherwise the UI falls back to "You do not have permission to do that." (403) or "That could not
-be found." (404). After a failed action the claim is reloaded so the screen shows its true state.
-
----
-
-## Part E: Known limitations and next steps
-
-The items below are current gaps or verification requirements, not claims that the proposed follow-up work has already been completed. The container stack and real-broker Kafka path should be treated as unverified until a successful run is recorded.
-
-### Backend (deliberate, for the sprint)
-| Limitation | Next step |
+| Entity | Responsibility and key attributes |
 |---|---|
-| No optimistic locking: two officers acting at the same instant could race | Add `@Version` to `Claim`, map the conflict to 409 |
-| Kafka path wired and unit-tested but **not run against a real broker** (a Docker Compose with Kafka exists, `DOCKER.md`, but no run result is recorded) | Run it; add an integration test (Testcontainers) |
-| With the broker down, `KafkaTemplate.send` can block up to Kafka's default `max.block.ms` (60 s) before the 10 s acknowledgement timeout applies, holding the relay thread and its transaction | `spring.kafka.producer.properties.max.block.ms=10000` |
-| Outbox poller runs in every instance, so duplicates are possible with several instances | Row locking (`FOR UPDATE SKIP LOCKED`) or a dedicated relay |
-| `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL (add the driver; the datasource example is already commented in `application.properties`), real user provisioning |
-| The H2 console is opt-in (`H2_CONSOLE_ENABLED=true`; off by default, in `application.properties` and in the Docker compose file) but, when on, needs no sign-in | Never enable it in a shared environment; once a persistent database replaces H2, delete the console settings and the `SecurityConfig` branch |
-| Documents are stored as BLOBs in the database: lost on restart like everything else, held fully in memory when read or sent, and capped at 5 files of 5 MB per claim | Object storage (S3 or similar) with only a key in `claim_documents`, streamed downloads, then the limits can rise |
-| Uploaded files are not scanned for malware, and the type check looks only at a file's first bytes (a file that starts like a PDF may still be malformed); there is no way to remove or replace a document | A virus-scan step before a document is made visible; deletion for the owner while the claim is open, with an audit entry |
-| The documents endpoints are not in the Postman collection | Add them to `backend/postman/` (upload needs a file chosen in Postman) |
-| Test coverage is a report (JaCoCo, 97.1% lines), not a build gate, and there is no CI | Add a coverage threshold and a CI workflow that runs `mvn verify` and `npm test` |
-| `assignedOfficer` can be re-assigned without a history entry; rejected and settled claims can still be reassigned | Record assignment events; refuse assignment of terminal claims |
-| Performance dashboard counts only; no time-to-decision | Use `claim_status_history` timestamps |
-| No claimant notifications | Consumer of `ClaimStatusChanged` (the seam exists) |
-| JWT: no refresh or revocation; default dev secret | Short-lived access tokens + refresh, secret from a vault |
-| No rate limiting on login | Gateway or filter-level throttling |
+| `User` | Email, password hash, full name, role (`CLAIMANT`, `OFFICER`, `MANAGER`) |
+| `Claim` | Claim/policy numbers, claimant details, incident date, description, amount, claim type, market, status, claimant, assigned officer, information request/response, decision notes, timestamps |
+| `ClaimStatusHistory` | Append-only transition record: claim, previous and next status, actor, note, timestamp |
+| `ClaimDocument` | File metadata, content, uploader, upload timestamp, and associated claim |
+| `OutboxEvent` | Aggregate identity, event type, JSON payload, creation time, publication time |
 
-### Frontend and integration
-| Limitation | Next step |
+Relationships: a claimant may own multiple claims; a claim may have an assigned officer, multiple status-history records, and multiple supporting documents. Outbox events reference the claim aggregate by type and ID.
+
+`claimType` is `MOTOR` or `PROPERTY`. `market` is a validated two-letter code, not an enum, because the platform does not own a definitive market list.
+
+## 6. Claim lifecycle
+
+![Claim lifecycle](docs/diagrams/claim-lifecycle.svg)
+
+| Current status | Allowed next status | Actor/action |
+|---|---|---|
+| `SUBMITTED` | `UNDER_REVIEW` | Assigned officer or manager starts review |
+| `UNDER_REVIEW` | `MORE_INFO_REQUIRED` | Officer/manager requests information |
+| `MORE_INFO_REQUIRED` | `UNDER_REVIEW` | Claimant provides information or staff resumes review |
+| `UNDER_REVIEW` | `APPROVED` | Officer/manager approves |
+| `UNDER_REVIEW` | `REJECTED` | Officer/manager rejects |
+| `APPROVED` | `SETTLED` | Officer/manager settles |
+| `REJECTED` | None | Terminal state |
+| `SETTLED` | None | Terminal state |
+
+An unsupported transition returns `409 Conflict`. Pickup and assignment set the responsible officer but do not change the claim status; the claim remains `SUBMITTED` until review begins.
+
+## 7. Synchronous API and asynchronous events
+
+### 7.1 Interaction model
+
+| Operation | Mechanism | Reason |
+|---|---|---|
+| Submit, read, list, queue, pickup, assign | Synchronous REST | The caller needs a direct result |
+| Review, request information, provide information, approve, reject, settle | Synchronous REST command | The backend must validate the current status and authorization |
+| Notify consumers that status changed | Asynchronous event | Notification delivery must not block a claim update |
+| Manager dashboards | REST queries | Current implementation computes aggregates from the database |
+
+### 7.2 Transactional outbox sequence
+
+1. The service validates the transition.
+2. In one database transaction, it updates the claim and inserts both a history row and an outbox event.
+3. A scheduled relay reads unpublished events oldest-first and calls the configured publisher.
+4. After successful publication, the relay marks the row as published. On failure, it leaves the event for retry and stops that batch to preserve order.
+
+### 7.3 Delivery semantics
+
+- **At-least-once:** a process failure between broker acknowledgement and marking the row published can result in a repeated event.
+- **Duplicate protection:** events carry an `eventId`; consumers use it to avoid sending duplicate notifications.
+- **Per-claim ordering:** the claim ID is used as the Kafka record key.
+- **Default mode:** the logging publisher allows local use without a broker.
+- **Kafka mode:** set `app.events.publisher=kafka` (or `EVENTS_PUBLISHER=kafka`) and configure `spring.kafka.bootstrap-servers`.
+
+The event topic defaults to `claims.claim-status-changed`. The event contains claim identifiers, type, market, amount, old/new status, actor, timestamp, and claimant name/email for notification delivery. Because claimant contact details are present in the event, Kafka access and retention should be restricted.
+
+### 7.4 Notification service
+
+The notification service consumes status-change events and sends claimant emails. The recorded implementation includes retries, a dead-letter topic, duplicate protection, and a local Mailpit inbox in the Docker configuration. The service has no claims database and does not call the claims API.
+
+## 8. Security and authorization
+
+- JWT bearer authentication; password hashes use BCrypt.
+- Role checks and claim ownership checks are enforced by the backend, including method-level security.
+- The UI's role guards and hidden buttons are usability features, not security boundaries.
+- Public authentication endpoints are registration and login. Public registration creates claimant accounts only.
+- Swagger/OpenAPI is available for local API exploration.
+- The H2 console is disabled by default. When enabled for local development, it does not require an application token and must not be exposed in a shared environment.
+- Seeded staff accounts are local-demo credentials only. Production deployment requires secure secret handling, account provisioning, and security review.
+
+## 9. Frontend design
+
+The frontend is a single Angular 22 application with standalone components, lazy-loaded role areas, signals for local screen state, RxJS for asynchronous API operations, and a shared API service. It provides claimant, officer, and manager workflows in one interface.
+
+The frontend calls relative `/api` URLs through the development proxy or the nginx proxy configured for Docker. Backend response codes remain authoritative; the UI maps known errors into user-facing messages.
+
+The report form provides a six-market selection, a seven-day incident-date window, and a generated policy number. These are UI conventions; the API itself accepts any valid two-letter market code, any past incident date, and a policy number within its API length limit.
+
+## 10. Integration contracts
+
+### 10.1 API contract ownership
+
+The backend owns endpoint paths, request/response models, validation, authorization, and error semantics. Every endpoint should be documented in OpenAPI, and changes to the contract should be accompanied by backend tests, frontend model/service changes, and documentation updates.
+
+### 10.2 Same-origin proxy
+
+The backend has no CORS configuration. Local development uses `frontend/proxy.conf.json` to route `/api` to port `8080`; the Docker topology uses nginx for the same purpose. If the frontend is hosted on a different origin, CORS or an equivalent gateway arrangement will be needed.
+
+### 10.3 Validation rules
+
+At submission, the API requires the claimant email to match the authenticated account, a description of at least 20 characters, a positive amount with at most two decimal places, a non-future incident date, a two-letter market code, and a supported claim type. The UI adds narrower choices for the incident date, market list, and generated policy number.
+
+### 10.4 Assignment and decision notes
+
+Assignment and pickup determine who is responsible for a claim; review and decision actions control the lifecycle. Status history is append-only and records who made a transition and the associated note where applicable.
+
+## 11. Testing and verification
+
+The following are the latest verification results recorded in the project documents on **2026-10-26**. They are historical evidence, not a guarantee that a later checkout remains unchanged.
+
+| Area | Recorded result | Notes |
+|---|---|---|
+| Backend | 118 tests passed; 97.1% line coverage; 86.9% branch coverage | Maven tests and JaCoCo |
+| Notification service | 76 tests passed | Tests start Kafka and SMTP infrastructure in the JVM |
+| Frontend | 312 tests passed; strict production build passed | Vitest and Angular build |
+| Integrated services | Backend, notification service, Kafka broker, and SMTP server run together outside Docker | Recorded on 2026-10-26 |
+| Browser checks | Redesigned screens and document upload manually checked at desktop and phone widths | Real file chooser and drag-and-drop were not exercised |
+| Docker Compose | Not verified in the available development record | Must be built and tested in the target environment |
+
+Re-run the commands in `README.md` before presenting current test counts as freshly verified.
+
+## 12. Limitations and evolution plan
+
+| Current limitation | Recommended next step | Why |
+|---|---|---|
+| H2 is in-memory and resets on restart | PostgreSQL plus Flyway migrations | Durable data and repeatable schema changes |
+| Docker Compose execution is unverified | Build and exercise the full stack in a clean environment | Verify configuration, health, networking, Kafka and email flow |
+| No browser-level automated end-to-end suite | Add a small stable E2E suite | Catch integration and rendering defects beyond unit tests |
+| No optimistic locking | Add a version column and conflict handling | Protect concurrent edits to the same claim |
+| Documents are stored in database rows | Consider object storage, malware scanning, and retention policies | Scale and govern file handling |
+| Event payload includes claimant contact details | Apply least-privilege topic access and retention controls | Reduce exposure of personal data |
+| Demo credentials and local security settings | Externalize secrets and complete production security review | Safe deployment beyond local assessment |
+| Dashboards query the operational database | Consider a dedicated read model only if measured load justifies it | Separate reporting load from claim writes |
+
+## Appendix A. Useful local endpoints
+
+| Endpoint | Purpose |
 |---|---|
-| The backend has no CORS configuration, so the UI works only through the dev proxy or a same-origin gateway | Serve the built SPA behind a same-origin gateway, or add CORS for the real origin |
-| The action table is a **copy** of backend rules and can drift | Backend returns `allowedActions` on each claim; the table disappears |
-| No officers endpoint; the manager picker borrows the performance endpoint | `GET /api/users?role=OFFICER` |
-| No currency on claims: amounts are shown by market and the cross-market totals are labelled unconverted | Add `currency` to the claim and convert (or stop summing) on the server |
-| The session token is in `localStorage`, readable by any script on the page (XSS) | Short-lived access token in memory plus a refresh token in an httpOnly cookie |
-| Officer approve/reject/settle and the manager assign picker were covered by unit tests and a scripted API run, **not clicked through in a browser by the AI that wrote them**; dark mode and phone width were looked at on 2026-10-26 (by eye, a few screens each), not systematically | Run `docs/E2E-VALIDATION-FLOW.txt` in a browser; add Playwright end-to-end tests |
-| The report form's market list, 7-day limit and generated policy number are enforced only in the UI (C.7); the backend accepts any market code, any past date and any policy number | Move the rules that must hold into the backend validation (and a markets endpoint, so the list has one owner) |
-| The form's document limits (5 files, 5 MB, PDF/JPG/PNG) are a copy of the backend's, so changing a limit on the server means changing `core/documents.ts` (and the nginx `client_max_body_size`, 7 MB, in `frontend/nginx.conf`) as well | The backend publishes its limits (for example in an `/api/config` response) and the UI reads them |
-| The report form sends each document as its own request after the claim is created; a failed upload leaves the claim submitted and is reported on the claim page, where it can be retried. Attaching files in a real browser's file chooser was not driven by the AI (files were handed to the form through a script); drag-and-drop and the chooser dialog were not exercised | Try both by hand; a Playwright test that uses the real file chooser |
-| No browser-level automated tests; no accessibility audit | Playwright plus an axe pass in CI |
-| Lists and the queue are paged (10 per page) but never auto-refresh, so a second officer picking up a claim is only noticed on reload or on a 409 | Periodic refresh or server-sent events for the queue |
+| `http://localhost:4200` | Frontend |
+| `http://localhost:8080/swagger-ui/index.html` | Swagger UI |
+| `http://localhost:8080/v3/api-docs` | OpenAPI JSON |
+| `http://localhost:8080/h2-console` | H2 console; disabled by default |
+
+## Appendix B. Related documents
+
+- [README](README.md)
+- [AI Working Journal](AI_JOURNAL.md)
+- [Repository contributor guide](CLAUDE.md)
+- [Docker guide](DOCKER.md)
+- [End-to-end validation flow](docs/E2E-VALIDATION-FLOW.txt)
+- [Swagger test guide](docs/SWAGGER-TEST-GUIDE.txt)

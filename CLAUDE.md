@@ -4,24 +4,26 @@ Internal development guidance for AI coding assistants and contributors. This fi
 
 ## What this is
 
-One repository, two applications, one set of documents:
+One repository, three applications, one set of documents:
 
 | Path | What | Rules for working in it |
 |---|---|---|
 | `backend/` | Spring Boot 3.4 / Java 21 REST API on in-memory H2 (owner of the API contract) | [backend/CLAUDE.md](backend/CLAUDE.md) |
 | `frontend/` | Angular 22 single-page app for claimants, officers and managers | [frontend/CLAUDE.md](frontend/CLAUDE.md) |
+| `notification-service/` | Spring Boot Kafka consumer that emails the claimant on each status change (no database, no business API) | [notification-service/CLAUDE.md](notification-service/CLAUDE.md) |
 | `README.md` | How to run it, accounts, API summary | keep it the single entry point |
 | `ARCHITECTURE.md` | Backend (part B), frontend (part C), integration (part D), limitations (part E) | update it when a design decision changes |
 | `AI_JOURNAL.md` | How AI was used: backend Parts A–B, frontend and packaging Part C (F-numbers), open questions D, limitations E, open items F | see rule 4 |
 | `docs/` | `E2E-VALIDATION-FLOW.txt` (manual test script), `SWAGGER-TEST-GUIDE.txt` | keep the numbers in the E2E script true when behaviour changes |
-| `docker-compose.yml`, `DOCKER.md`, `*/Dockerfile`, `frontend/nginx.conf` | Containers: Kafka + backend + frontend | keep `DOCKER.md` and the compose file in step; the topic name appears in compose twice and must match `EVENTS_TOPIC` |
+| `docker-compose.yml`, `DOCKER.md`, `*/Dockerfile`, `frontend/nginx.conf` | Containers: Kafka + backend + notification service + Mailpit + frontend | keep `DOCKER.md` and the compose file in step; the topic names appear in compose in `kafka-init` and in the environment of both Kafka users and must match `EVENTS_TOPIC` / `DEAD_LETTER_TOPIC` |
 
 ## Common commands
 
 | Task | Command (run from the folder shown) |
 |---|---|
 | Run the backend (port 8080) | `mvn spring-boot:run` in `backend/` |
-| Backend tests (117) and coverage report | `mvn test` in `backend/` |
+| Backend tests (118) and coverage report | `mvn test` in `backend/` |
+| Notification service tests (76; they start a real Kafka broker and SMTP server in the JVM, about a minute) | `mvn test` in `notification-service/` |
 | Run the UI (port 4200, proxies `/api` to 8080) | `npm install` once, then `npm start` in `frontend/` |
 | UI tests (312) and production build | `npm test -- --no-watch`, `npm run build` in `frontend/` |
 | Everything in containers (Kafka included) | `docker compose up --build -d` in the repository root, then see `DOCKER.md` |
@@ -53,3 +55,7 @@ One repository, two applications, one set of documents:
     5 files, 5 MB each, PDF/JPG/PNG), the UI's copy (`frontend/src/app/core/documents.ts`) and nginx (`client_max_body_size` in
     `frontend/nginx.conf`). Change all three together; the backend is the one that decides, and it checks the file's real type from its
     first bytes, never its name.
+11. **The `ClaimStatusChanged` event is a contract between the backend and the notification service.** Only add fields, never rename or remove one
+    (`ClaimAuditRecorderTest` pins the names the service reads). The event carries the claimant's email and name, which are personal data: do not add
+    fields a consumer does not need, never log an address unmasked (`Masking.email` in the service), and keep the officer's notes out of the event.
+    A change to the event changes `notification-service/` (`ClaimStatusChanged`, `EventParser`, its tests) and `ARCHITECTURE.md` B.3 in the same commit.
