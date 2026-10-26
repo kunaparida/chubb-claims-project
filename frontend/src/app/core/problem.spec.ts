@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { fieldErrors, problemMessage } from './problem';
+import { fieldErrors, problemMessage, readBlobProblem } from './problem';
 
 const http = (status: number, error: unknown) => new HttpErrorResponse({ status, error, statusText: 'x' });
 
@@ -60,4 +60,25 @@ describe('problem helpers', () => {
     expect(fieldErrors(http(409, { errors: { a: 'b' } }))).toEqual({});
     expect(fieldErrors('nope')).toEqual({});
   });
-});
+
+  describe('readBlobProblem (a failed download keeps its explanation inside a Blob)', () => {
+    const blobError = (status: number, text: string) => new HttpErrorResponse({ status, statusText: 'x', error: new Blob([text]) });
+
+    it('lets the backend explanation through', async () => {
+      const err = await readBlobProblem(blobError(404, JSON.stringify({ detail: 'Document not found' })));
+      expect(problemMessage(err)).toBe('Document not found');
+      expect((err as HttpErrorResponse).status).toBe(404);
+    });
+
+    it('keeps the status-based message when the body is not JSON', async () => {
+      const err = await readBlobProblem(blobError(403, 'not json'));
+      expect(problemMessage(err)).toBe('You do not have permission to do that.');
+    });
+
+    it('leaves any other error alone', async () => {
+      const plain = http(409, { detail: 'x' });
+      expect(await readBlobProblem(plain)).toBe(plain);
+      const other = new Error('boom');
+      expect(await readBlobProblem(other)).toBe(other);
+    });
+  });});

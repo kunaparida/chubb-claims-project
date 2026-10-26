@@ -69,8 +69,10 @@ named in the last column give the detail. "Revisit when" says what would change 
 | Frontend state | Signals in components, one API service, a central action table (C.5) | NgRx or another store | State is per screen and short-lived; there is nothing shared enough to justify a store | Screens start sharing and mutating the same data |
 | Browser to backend | Same-origin: dev proxy, or nginx in Docker (D.2) | Adding CORS to the backend | The backend owns the contract and is not edited from the UI; same-origin also works unchanged behind a gateway | The SPA is served from another origin |
 | Database | In-memory H2, schema from Hibernate | PostgreSQL with migrations | No database server was available to the author (`AI_JOURNAL.md`, Prompt 3); keeps the project runnable with one command | Data must survive a restart (PostgreSQL, Flyway; part E) |
+| Claim documents (optional attachments) | Stored as a BLOB row next to the claim; the type is decided from the file's first bytes (B.9) | Files on disk; object storage (S3) with only a key in the database; trusting the browser's file type | There is no storage service here, a row keeps the file inside the claim's access rules and transaction, and a name or browser type can be faked | Files are larger or more numerous than a few MB per claim, or need scanning or retention rules (object storage plus a virus scan; part E) |
 
-**What was built and what was left out.** The time went first to the backend (all 19 endpoints, workflow rules, audit history, outbox,
+**What was built and what was left out.** The time went first to the backend (all 22 endpoints, workflow rules, audit history, outbox,
+optional claim documents,
 dashboards, tests), then to a complete Angular UI for all three roles. Left out on purpose, each with a next step in part E: a persistent
 database and migrations, optimistic locking, a Kafka consumer (notifications), refresh tokens, browser-level end-to-end tests and an
 accessibility audit.
@@ -97,7 +99,7 @@ accessibility audit.
                           └───────────────────────────┬───────────────────────────┘
                                                       ▼
                           H2 in-memory  (PostgreSQL: commented example only)
-                          tables: users, claims, claim_status_history, outbox_events
+                          tables: users, claims, claim_status_history, claim_documents, outbox_events
                                                       │
                   OutboxPublisher (scheduled) ────────┘──► EventPublisher
                                                             ├─ LoggingEventPublisher (default)
@@ -123,6 +125,7 @@ writes. The seam already exists: the `ClaimStatusChanged` event.
 
 ```
 users ─┬─< claims >─┬─< claim_status_history
+       │            ├─< claim_documents (uploaded_by_id → users)
        │            └─ (assigned_officer_id → users)
        └─ (claimant_id → users)                    outbox_events (aggregate = Claim, id = claim id)
 ```
@@ -132,6 +135,7 @@ users ─┬─< claims >─┬─< claim_status_history
 | `User` | email (unique), password hash, fullName, role (CLAIMANT / OFFICER / MANAGER) |
 | `Claim` | claimNumber (unique), policyNumber, claimant details, incidentDate, description, amountClaimed, **claimType** (MOTOR / PROPERTY), **market** (2-letter code), status, claimant, assignedOfficer, informationRequest, **informationResponse**, decisionNotes, timestamps |
 | `ClaimStatusHistory` | claim, fromStatus (null for the first record), toStatus, changedBy, note, changedAt: append-only audit trail |
+| `ClaimDocument` | claim, fileName (directories stripped), contentType (decided from the file's contents), sizeBytes, the bytes (`@Lob`), uploadedBy, uploadedAt: an optional attachment, at most 5 per claim |
 | `OutboxEvent` | aggregateType, aggregateId, eventType, JSON payload, createdAt, publishedAt (null = not yet published) |
 
 `market` is a validated 2-letter code, not an enum, because the list of markets is business data I do not own.
@@ -205,6 +209,8 @@ JWT (HS256) in `Authorization: Bearer`, stateless; BCrypt passwords; method secu
 | `PUT .../review`, `request-info`, `approve`, `reject`, `settle` | no | assigned officer | yes |
 | `PUT .../provide-info` | owner, only when info requested | no | no |
 | `GET .../history` | own claims | same as view | all |
+| `POST .../documents` | owner, while the claim is open | no (403) | no (403) |
+| `GET .../documents`, `GET .../documents/{id}` | own claims | same as view | all |
 | `GET /api/dashboard/*` | no | no | yes |
 
 Other claimants' or officers' claims return **404**, not 403, so existence is not leaked. Public registration can only
@@ -218,7 +224,8 @@ who can reach the port can read and change the database; use it only on your own
 ### B.6 Error model
 RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map for field validation.
 `400` validation or bad input, `401` no/invalid token, `403` role or ownership, `404` not found or not visible,
-`405`/`415` wrong method or content type, `409` invalid state transition or conflict, `500` generic (details only in logs).
+`405` wrong method, `409` invalid state transition or conflict, `413` an uploaded file over the size limit, `415` wrong content type or a
+file that is not a PDF, JPG or PNG, `500` generic (details only in logs).
 
 ### B.7 API conventions
 - **Commands, not a generic status patch.** Each transition is its own `PUT /api/claims/{id}/<command>` (`review`, `request-info`,
@@ -230,6 +237,8 @@ RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map f
   address works.
 - **Lists are paged** (`page`, `size`, newest first; the officer queue oldest first) and role-scoped by the server, never by the client.
 - **One error shape** (RFC 7807, B.6) with a field-to-message map on `400`; `404` instead of `403` for claims the caller may not see.
+- **Documents are a sub-resource of the claim** (`/api/claims/{id}/documents`, B.9): one file per `POST` as `multipart/form-data`, a details-only
+  list, and a download that is sent as an attachment. Visibility is the claim's visibility, so there is no second set of rules to drift.
 - **Documented in OpenAPI.** Every endpoint has a summary, a description of who may call it and what it does to the status, and its error
   responses; request bodies carry examples so Swagger's "Try it out" is pre-filled with valid values. `ApiContractTest` fails if an endpoint
   is added without a summary. The document is served at `/v3/api-docs` and the UI at `/swagger-ui/index.html`.
@@ -240,12 +249,39 @@ RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map f
 - Spring Boot integration tests on H2: the original role/workflow flow, the lifecycle extensions (queue, pick-up, claimant answer,
   history, filter, outbox, liability breakdown), and `ApiContractTest` (the `Location` header, the H2 console closed by default, every
   endpoint documented).
+- Documents: service tests (the signature check, a name that contradicts the contents, empty, oversized and nameless files, the exact size
+  limit, who may attach, closed claims, the file-count limit, the cleaned file name) and MockMvc integration tests on H2 (attach, list and
+  download; plain and accented file names in `Content-Disposition`; another claimant, staff and anonymous callers; a missing file part;
+  the sixth file; a rejected claim that keeps the documents it has).
 - Wiring tests prove the publisher is chosen by configuration.
-- Postman collection (`backend/postman/`) replays the same flow, with assertions, in collection order.
-- **Coverage is measured, not assumed:** `mvn test` runs JaCoCo and writes `backend/target/site/jacoco/index.html`. On 2026-10-24
-  (JDK 21, JaCoCo 0.8.15, 85 tests): **97.0% of lines (520/536), 96.7% of instructions, 85.7% of branches (90/105)**. It is a report, not a
+- Postman collection (`backend/postman/`) replays the same flow, with assertions, in collection order. It was **not** extended for the
+  documents endpoints (Swagger and the integration tests cover them).
+- **Coverage is measured, not assumed:** `mvn test` runs JaCoCo and writes `backend/target/site/jacoco/index.html`. On 2026-10-26
+  (JDK 21, JaCoCo 0.8.15, 117 tests): **97.1% of lines (639/658), 96.9% of instructions, 86.9% of branches (133/153)**. It is a report, not a
   build gate; the lowest are the application's main class, `config` (91.5%) and `security` (93.9%). Coverage shows what ran, not that it was asserted well, so
   the role matrix and the workflow are also exercised by the Postman run and the manual script in `docs/`.
+
+### B.9 Claim documents
+
+A claimant may attach supporting files (photos, a repair estimate, a report) when reporting an incident or later. It is optional and never
+blocks a claim. All the rules are in `ClaimDocumentService`; the controller only translates HTTP.
+
+| Rule | Value | Failure |
+|---|---|---|
+| Who may attach | the claimant who owns the claim; officers and managers are read-only | `403` (another claimant's claim is `404`) |
+| When | any open status; closed once the claim is `REJECTED` or `SETTLED` | `409` |
+| How many | at most 5 per claim (`app.documents.max-files`) | `409` |
+| How big | at most 5 MB each (`app.documents.max-bytes`); an empty file is refused | `413`, `400` |
+| What type | PDF, JPG or PNG, **decided from the file's first bytes**, and the extension must agree (`.pdf` / `.jpg` `.jpeg` / `.png`) | `415` |
+| The name | directories and control characters removed, at most 255 characters | `400` |
+
+Why the first bytes: a name or the browser's reported type can be anything, so a script renamed `estimate.pdf` is refused because it does not
+begin with `%PDF-`. Downloads are sent as an attachment with `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`, so a browser
+saves the file instead of running it and does not keep a copy. The web server also limits the request (`spring.servlet.multipart.*`,
+`server.tomcat.max-swallow-size`) so an oversized upload is answered with a clean `413` instead of a reset connection.
+
+Files are stored as a `@Lob` column in `claim_documents`, which suits the in-memory H2 database and keeps a file inside the claim's own
+access rules; a real deployment would put the bytes in object storage and keep only a key (part E).
 
 ---
 
@@ -256,15 +292,23 @@ RFC 7807: `type`, `title`, `status`, `detail`, `instance`, and an `errors` map f
 ```
 frontend/src/app/
   core/       models.ts            API types, mirrored from the backend (no `any`)
-              api.service.ts       the ONLY file that knows URLs: one method per endpoint (19)
+              api.service.ts       the ONLY file that knows URLs: one method per endpoint (22)
               auth.service.ts      session signal, login / register / logout, GET /api/auth/me re-validation
               auth.interceptor.ts  bearer token on /api/ calls; 401 → sign out
               guards.ts            authGuard, roleGuard(...), homeRedirectGuard
               problem.ts           HTTP error → one human-readable message
               claim-actions.ts     THE action table: who can do what to a claim
-  shared/     status-badge.ts, amount.pipe.ts
-  shell/      signed-in frame and role navigation
+              claim-progress.ts    the four stages shown on a claim page (presentation only, grants nothing)
+              markets.ts           the six markets the report form offers
+              dates.ts             the 7-day incident window, "3 h ago" labels
+              policy-number.ts     the generated policy reference
+              documents.ts         the attachment limits (5 files, 5 MB, PDF/JPG/PNG) and the check that explains a refused file
+              save-file.ts         saves a downloaded Blob (the only code that touches the DOM to do so)
+              flash.ts             one message for the next page to show once (e.g. what happened to the documents after submitting)
+  shared/     status-badge.ts, amount.pipe.ts, icon.ts (SVG icons), logo.ts (brand mark), auth-shell.ts (sign-in frame)
+  shell/      signed-in frame (header, role navigation, user chip)
   features/   login · register · claims (list, new-claim, claim-detail) · queue · dashboard
+  styles.css  the design system: tokens, light and dark themes, every shared component class
   testing.ts  fixtures used only by specs (excluded from the app build)
 ```
 
@@ -272,7 +316,7 @@ frontend/src/app/
 |---|---|
 | Standalone components, `inject()`, signals, functional guards and interceptors, no NgModules | Current Angular style; less boilerplate; state changes drive the view without change-detection plumbing. |
 | **Zoneless** (`provideBrowserGlobalErrorListeners()`, no `zone.js`) | Smaller bundle, and signals already tell Angular when to re-render. |
-| One lazy-loaded chunk per page | The claimant never downloads the dashboard code. Initial bundle is about 293 kB; each page is a separate chunk. |
+| One lazy-loaded chunk per page | The claimant never downloads the dashboard code. Initial bundle is about 316 kB (86 kB over the wire); each page is a separate chunk. |
 | File names without the `.component` suffix (`claim-detail.ts`) | The current Angular CLI convention; selector prefix `app`. |
 
 ### C.2 Routes and role landing pages
@@ -281,8 +325,8 @@ frontend/src/app/
 |---|---|---|
 | `/login`, `/register` | public | Sign in (a demo-accounts panel fills in the seeded emails); create a claimant account |
 | `/claims` | any signed-in role | Role-scoped list: claimant = mine, officer = assigned to me, manager = all |
-| `/claims/new` | claimant | Report a claim (name and email prefilled from the session) |
-| `/claims/:id` | any (server decides visibility) | Detail, status history, and the actions the viewer may take |
+| `/claims/new` | claimant | Report an incident: name and email from the session, market from a list of six, incident date limited to the last 7 days, policy number generated, optional documents, and a plain-language message for every missing or invalid field (C.7) |
+| `/claims/:id` | any (server decides visibility) | Detail, documents (download for everyone who can see the claim; "Add documents" for the owning claimant while the claim is open), status history, and the actions the viewer may take |
 | `/queue` | officer, manager | Unassigned submitted claims, oldest first; pick up (officer) or assign (manager) |
 | `/dashboard` | manager | Workload, liability by market, officer performance |
 
@@ -295,7 +339,8 @@ After sign-in a claimant lands on `/claims`, an officer on `/queue`, a manager o
   methods and receive typed observables.
 * **One error helper (`problem.ts`)** turns a failure into a message: the RFC 7807 `detail` if present; the joined `errors` map for a
   400; "cannot reach the server" for status 0 *and* for 502/503/504, because the dev proxy answers 502 with an empty body when the
-  backend is down; a generic fallback otherwise. No stack traces or JSON ever reach the screen.
+  backend is down; a generic fallback otherwise. No stack traces or JSON ever reach the screen. A failed *download* arrives as a Blob (the
+  request asked for one), so `readBlobProblem` reads the explanation back out of it before the helper runs.
 * **Every screen has loading, empty and error states**, and submit buttons are disabled while a request is in flight.
 
 ### C.4 Session
@@ -327,21 +372,58 @@ Rules for this table: no role or status `if` statements in templates; a spec che
 backend workflow; and because the table is only a convenience, every action still handles 403, 404 and 409 by showing the server's
 `detail` and reloading the claim.
 
+The same file answers one more question, `canAddDocuments(claim, viewer)`: true only for the claimant who owns the claim while it is not
+`REJECTED` or `SETTLED`, which is what the backend allows (B.9). It is tested against every role and status, like the table above.
+
 ### C.6 Money
 
 The backend has **no currency field**: `amountClaimed` is a bare number and `market` is a 2-letter code. So every amount is shown
 with its market (`amount` pipe), the dashboard leads with the per-market lines, and the grand totals (which the backend adds
 across markets) are labelled **"unconverted, mixed markets"**. No exchange rates are invented.
 
-### C.7 Testing strategy
+### C.7 The report form's own rules, and the look of the app
 
-* **Vitest** (via `@angular/build:unit-test`, jsdom), **216 tests** across 15 spec files.
+**Rules that live only in the UI.** The report form is more restrictive than the API, on purpose, and each rule is one small file with its own
+spec:
+
+| Rule | Where | What the backend does |
+|---|---|---|
+| Market chosen from six (SG, HK, IN, MY, TH, ID) | `core/markets.ts` | Accepts any two-letter code. The brief says there are six markets but does not name them, so this list is an assumption |
+| Incident date from 7 days ago to today | `core/dates.ts` | Refuses only future dates |
+| Policy number generated as `POL-<year>-<six digits>` | `core/policy-number.ts` | Accepts any non-blank value up to 64 characters |
+
+**Saying what is wrong.** A submit with missing or invalid required fields does not fail silently: each field shows its own message
+(for example "Select the market the claim relates to.", "Describe what happened in at least 20 characters (you have written 7).") with
+`aria-invalid` and `aria-describedby`, an error summary at the top (`role="alert"`) lists them as links in form order, and focus moves to
+the first field to fix. A message from the server (a 400 field map) is shown against its field the same way.
+
+**Documents on the form** are optional. A file is checked as soon as it is chosen (type, 5 MB, 5 files, empty, duplicate) and a refused
+file is listed with the reason while the valid ones stay; the form never blocks on them. The files are sent after the claim exists, one
+request each, because the claim must exist before it can own a document. If some fail, the claim is still submitted: the claim page opens
+with a warning saying how many could not be attached and that they can be added there. The same limits are in `core/documents.ts`, a copy of
+the backend's (C.5's caveat applies: the server has the last word and checks the real file type).
+
+"Today" is the earlier of the viewer's date and the UTC date, because the backend judges "not in the future" by its own clock and a
+container usually runs on UTC; the first hours of an Asian morning therefore cannot pick "today". These rules are conveniences like the
+action table (C.5): a different client could bypass them, so a business rule that must hold (such as the 7-day limit) would have to move to
+the backend.
+
+**Look and feel.** One global stylesheet (`styles.css`) holds the design tokens (colour, radius, shadow) and every shared class, so pages carry
+no styles of their own. Light and dark themes follow the operating system (`prefers-color-scheme`); the layout is responsive down to a phone
+(the header collapses to icons and a scrolling navigation row, tables scroll sideways); the logo and icons are inline SVG drawn for the
+project, so there is no UI library and the app itself requests no image or font. Status is never colour alone: badges carry a label, and the
+claim stages carry a number or mark. Screenshots are in the README and in `docs/screenshots/`.
+
+### C.8 Testing strategy
+
+* **Vitest** (via `@angular/build:unit-test`, jsdom), **312 tests** across 20 spec files.
 * The API service is tested with `HttpTestingController` for every endpoint's verb, path and body; the interceptor, guards, error
   helper, session handling and the action table are tested as pure units; each page is tested through `TestBed` (rendering, the
   actions it offers, and failure handling).
 * Beyond unit tests: a scripted run of the full lifecycle against the **real backend** through the dev proxy (45 checks, with the
   numbers used in `docs/E2E-VALIDATION-FLOW.txt`) and a manual browser walkthrough (register, report, pick up, review, request info,
-  answer, dashboard). See [AI_JOURNAL.md](AI_JOURNAL.md) for what was and was not checked.
+  answer, dashboard), plus a look at the redesigned screens in a browser in light mode, dark mode and at phone width (2026-10-26). See
+[AI_JOURNAL.md](AI_JOURNAL.md) for what was and was not checked.
 
 ---
 
@@ -406,7 +488,10 @@ The items below are current gaps or verification requirements, not claims that t
 | Outbox poller runs in every instance, so duplicates are possible with several instances | Row locking (`FOR UPDATE SKIP LOCKED`) or a dedicated relay |
 | `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL (add the driver; the datasource example is already commented in `application.properties`), real user provisioning |
 | The H2 console is opt-in (`H2_CONSOLE_ENABLED=true`; off by default, in `application.properties` and in the Docker compose file) but, when on, needs no sign-in | Never enable it in a shared environment; once a persistent database replaces H2, delete the console settings and the `SecurityConfig` branch |
-| Test coverage is a report (JaCoCo, 97.0% lines), not a build gate, and there is no CI | Add a coverage threshold and a CI workflow that runs `mvn verify` and `npm test` |
+| Documents are stored as BLOBs in the database: lost on restart like everything else, held fully in memory when read or sent, and capped at 5 files of 5 MB per claim | Object storage (S3 or similar) with only a key in `claim_documents`, streamed downloads, then the limits can rise |
+| Uploaded files are not scanned for malware, and the type check looks only at a file's first bytes (a file that starts like a PDF may still be malformed); there is no way to remove or replace a document | A virus-scan step before a document is made visible; deletion for the owner while the claim is open, with an audit entry |
+| The documents endpoints are not in the Postman collection | Add them to `backend/postman/` (upload needs a file chosen in Postman) |
+| Test coverage is a report (JaCoCo, 97.1% lines), not a build gate, and there is no CI | Add a coverage threshold and a CI workflow that runs `mvn verify` and `npm test` |
 | `assignedOfficer` can be re-assigned without a history entry; rejected and settled claims can still be reassigned | Record assignment events; refuse assignment of terminal claims |
 | Performance dashboard counts only; no time-to-decision | Use `claim_status_history` timestamps |
 | No claimant notifications | Consumer of `ClaimStatusChanged` (the seam exists) |
@@ -421,6 +506,9 @@ The items below are current gaps or verification requirements, not claims that t
 | No officers endpoint; the manager picker borrows the performance endpoint | `GET /api/users?role=OFFICER` |
 | No currency on claims: amounts are shown by market and the cross-market totals are labelled unconverted | Add `currency` to the claim and convert (or stop summing) on the server |
 | The session token is in `localStorage`, readable by any script on the page (XSS) | Short-lived access token in memory plus a refresh token in an httpOnly cookie |
-| Officer approve/reject/settle and the manager assign picker were covered by unit tests and a scripted API run, **not clicked through in a browser by the AI that wrote them**; dark mode and narrow/mobile layouts were not checked | Run `docs/E2E-VALIDATION-FLOW.txt` in a browser; add Playwright end-to-end tests |
+| Officer approve/reject/settle and the manager assign picker were covered by unit tests and a scripted API run, **not clicked through in a browser by the AI that wrote them**; dark mode and phone width were looked at on 2026-10-26 (by eye, a few screens each), not systematically | Run `docs/E2E-VALIDATION-FLOW.txt` in a browser; add Playwright end-to-end tests |
+| The report form's market list, 7-day limit and generated policy number are enforced only in the UI (C.7); the backend accepts any market code, any past date and any policy number | Move the rules that must hold into the backend validation (and a markets endpoint, so the list has one owner) |
+| The form's document limits (5 files, 5 MB, PDF/JPG/PNG) are a copy of the backend's, so changing a limit on the server means changing `core/documents.ts` (and the nginx `client_max_body_size`, 7 MB, in `frontend/nginx.conf`) as well | The backend publishes its limits (for example in an `/api/config` response) and the UI reads them |
+| The report form sends each document as its own request after the claim is created; a failed upload leaves the claim submitted and is reported on the claim page, where it can be retried. Attaching files in a real browser's file chooser was not driven by the AI (files were handed to the form through a script); drag-and-drop and the chooser dialog were not exercised | Try both by hand; a Playwright test that uses the real file chooser |
 | No browser-level automated tests; no accessibility audit | Playwright plus an axe pass in CI |
 | Lists and the queue are paged (10 per page) but never auto-refresh, so a second officer picking up a claim is only noticed on reload or on a 409 | Periodic refresh or server-sent events for the queue |

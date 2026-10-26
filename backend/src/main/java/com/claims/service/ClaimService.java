@@ -107,6 +107,18 @@ public class ClaimService {
         return ClaimMapper.toResponse(claim);
     }
 
+    /**
+     * The claim, if the caller may view it (the same rules as {@link #get}); otherwise the 404 the API uses so that a claim's
+     * existence is not revealed. For services that attach something to a claim, such as documents.
+     */
+    @Transactional(readOnly = true)
+    public Claim viewableClaim(Long id, String actorEmail) {
+        User actor = userByEmail(actorEmail);
+        Claim claim = findClaim(id);
+        verifyCanView(claim, actor);
+        return claim;
+    }
+
     @Transactional(readOnly = true)
     public List<ClaimHistoryResponse> history(Long id, String actorEmail) {
         User actor = userByEmail(actorEmail);

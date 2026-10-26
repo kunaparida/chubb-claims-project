@@ -1,75 +1,173 @@
-<p><a routerLink="/claims">← My claims</a></p>
-<h1>Report an incident</h1>
-<p class="muted">Tell us what happened. A claims officer will pick it up and may ask you for more information.</p>
-
-<form class="card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
-  <div class="row">
-    <div>
-      <label for="claimantName">Your name</label>
-      <input id="claimantName" formControlName="claimantName" />
-      @if (problem('claimantName')) { <p class="field-error">{{ problem('claimantName') }}</p> }
-    </div>
-    <div>
-      <label for="claimantEmail">Your email</label>
-      <input id="claimantEmail" [value]="email" readonly />
-      @if (problem('claimantEmail')) { <p class="field-error">{{ problem('claimantEmail') }}</p> }
-    </div>
+<a class="back-link" routerLink="/claims"><app-icon name="back" />My claims</a>
+<div class="page-head">
+  <div>
+    <h1>Report an incident</h1>
+    <p class="muted">Tell us what happened. A claims officer will pick it up and may ask you for more information.</p>
   </div>
+  <p class="muted req-note"><span class="req" aria-hidden="true">*</span> marks a required field</p>
+</div>
 
-  <div class="row">
-    <div>
-      <label for="claimType">Type of claim</label>
-      <select id="claimType" formControlName="claimType">
-        <option value="MOTOR">Motor</option>
-        <option value="PROPERTY">Property</option>
-      </select>
+<form class="card form-card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  <section class="form-section">
+    <h2><span class="step-no">1</span>About you</h2>
+    <p class="muted">Taken from your account, so the claim is linked to you.</p>
+    <div class="row">
+      <div>
+        <label for="claimantName">Your name <span class="req" aria-hidden="true">*</span></label>
+        <input id="claimantName" formControlName="claimantName" autocomplete="name" required
+               [attr.aria-invalid]="showError('claimantName')" [attr.aria-describedby]="showError('claimantName') ? 'claimantName-error' : null" />
+        @if (showError('claimantName')) { <p class="field-error" id="claimantName-error">{{ errorFor('claimantName') }}</p> }
+        @if (problem('claimantName')) { <p class="field-error">{{ problem('claimantName') }}</p> }
+      </div>
+      <div>
+        <label for="claimantEmail">Your email</label>
+        <input id="claimantEmail" [value]="email" readonly />
+        @if (problem('claimantEmail')) { <p class="field-error">{{ problem('claimantEmail') }}</p> }
+      </div>
     </div>
-    <div>
-      <label for="market">Market <span class="muted">(2-letter code, e.g. SG)</span></label>
-      <input id="market" formControlName="market" maxlength="2" autocomplete="off" />
-      @if (form.controls.market.touched && form.controls.market.invalid) {
-        <p class="field-error">Enter a 2-letter market code.</p>
+  </section>
+
+  <section class="form-section">
+    <h2><span class="step-no">2</span>Policy and incident</h2>
+    <p class="muted">What was affected, where, and when it happened.</p>
+    <div class="row">
+      <div>
+        <label for="claimType">Type of claim <span class="req" aria-hidden="true">*</span></label>
+        <select id="claimType" formControlName="claimType" required
+                [attr.aria-invalid]="showError('claimType')" [attr.aria-describedby]="showError('claimType') ? 'claimType-error' : null">
+          <option value="MOTOR">Motor</option>
+          <option value="PROPERTY">Property</option>
+        </select>
+        @if (showError('claimType')) { <p class="field-error" id="claimType-error">{{ errorFor('claimType') }}</p> }
+      </div>
+      <div>
+        <label for="market">Market <span class="req" aria-hidden="true">*</span></label>
+        <select id="market" formControlName="market" required
+                [attr.aria-invalid]="showError('market')" [attr.aria-describedby]="showError('market') ? 'market-error' : null">
+          <option value="" disabled>Select a market…</option>
+          @for (m of markets; track m.code) {
+            <option [value]="m.code">{{ m.name }} ({{ m.code }})</option>
+          }
+        </select>
+        @if (showError('market')) { <p class="field-error" id="market-error">{{ errorFor('market') }}</p> }
+        @if (problem('market')) { <p class="field-error">{{ problem('market') }}</p> }
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="policyNumber">Policy number <span class="req" aria-hidden="true">*</span></label>
+        <div class="input-action">
+          <input id="policyNumber" formControlName="policyNumber" readonly aria-describedby="policyHint" />
+          <button type="button" class="icon-btn" (click)="regeneratePolicyNumber()" aria-label="Generate a new policy number" title="Generate a new policy number">
+            <app-icon name="refresh2" />
+          </button>
+        </div>
+        <p class="hint" id="policyHint">Generated for you. Use the button for a different number.</p>
+        @if (showError('policyNumber')) { <p class="field-error" id="policyNumber-error">{{ errorFor('policyNumber') }}</p> }
+        @if (problem('policyNumber')) { <p class="field-error">{{ problem('policyNumber') }}</p> }
+      </div>
+      <div>
+        <label for="incidentDate">Date of incident <span class="req" aria-hidden="true">*</span></label>
+        <input id="incidentDate" type="date" formControlName="incidentDate" [min]="minDate" [max]="maxDate" required
+               [attr.aria-invalid]="showError('incidentDate')"
+               [attr.aria-describedby]="showError('incidentDate') ? 'dateHint incidentDate-error' : 'dateHint'" />
+        <p class="hint" id="dateHint">Only the last {{ windowDays }} days can be reported ({{ minDate }} to {{ maxDate }}).</p>
+        @if (showError('incidentDate')) { <p class="field-error" id="incidentDate-error">{{ errorFor('incidentDate') }}</p> }
+        @if (problem('incidentDate')) { <p class="field-error">{{ problem('incidentDate') }}</p> }
+      </div>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <h2><span class="step-no">3</span>Claim details</h2>
+    <p class="muted">Describe the incident and the amount you are claiming.</p>
+
+    <label for="description">What happened? <span class="req" aria-hidden="true">*</span> <span class="label-hint">(at least 20 characters)</span></label>
+    <textarea id="description" formControlName="description" maxlength="4000" required
+              placeholder="For example: rear bumper damaged in a car park collision on Tuesday morning."
+              [attr.aria-invalid]="showError('description')" [attr.aria-describedby]="showError('description') ? 'description-error' : null"></textarea>
+    <p class="counter">{{ form.controls.description.value.length }} / 4000</p>
+    @if (showError('description')) { <p class="field-error" id="description-error">{{ errorFor('description') }}</p> }
+    @if (problem('description')) { <p class="field-error">{{ problem('description') }}</p> }
+
+    <div class="row">
+      <div>
+        <label for="amountClaimed">Amount you are claiming <span class="req" aria-hidden="true">*</span></label>
+        <div class="input-affix">
+          <input id="amountClaimed" type="number" min="0.01" step="0.01" formControlName="amountClaimed" placeholder="0.00" required
+                 [attr.aria-invalid]="showError('amountClaimed')" [attr.aria-describedby]="showError('amountClaimed') ? 'amountClaimed-error' : null" />
+          @if (form.controls.market.value) { <span class="affix">{{ form.controls.market.value }}</span> }
+        </div>
+        <p class="hint">Greater than zero, with at most two decimals.</p>
+        @if (showError('amountClaimed')) { <p class="field-error" id="amountClaimed-error">{{ errorFor('amountClaimed') }}</p> }
+        @if (problem('amountClaimed')) { <p class="field-error">{{ problem('amountClaimed') }}</p> }
+      </div>
+      <div></div>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <h2><span class="step-no">4</span>Supporting documents <span class="optional-tag">Optional</span></h2>
+    <p class="muted">Photos, estimates or reports can help us decide faster. PDF, JPG or PNG, up to {{ maxDocuments }} files of {{ maxDocumentSize }} each.</p>
+
+    <div class="dropzone" [class.dragging]="dragging()" (dragover)="onDragOver($event)" (dragleave)="dragging.set(false)" (drop)="onDrop($event)">
+      <app-icon name="upload" />
+      <p><strong>Drag files here</strong> or</p>
+      <input id="documents" type="file" multiple class="sr-only" [accept]="accept" (change)="onFileInput($event)" />
+      <label for="documents" class="btn"><app-icon name="paperclip" />Choose files</label>
+    </div>
+
+    <div aria-live="polite">
+      @if (fileProblems().length > 0) {
+        <ul class="problem-list" data-testid="file-problems">
+          @for (p of fileProblems(); track p) { <li class="field-error">{{ p }}</li> }
+        </ul>
       }
-      @if (problem('market')) { <p class="field-error">{{ problem('market') }}</p> }
     </div>
-  </div>
 
-  <div class="row">
-    <div>
-      <label for="policyNumber">Policy number</label>
-      <input id="policyNumber" formControlName="policyNumber" />
-      @if (problem('policyNumber')) { <p class="field-error">{{ problem('policyNumber') }}</p> }
-    </div>
-    <div>
-      <label for="incidentDate">Date of incident</label>
-      <input id="incidentDate" type="date" formControlName="incidentDate" [max]="today" />
-      @if (form.controls.incidentDate.errors?.['future']) {
-        <p class="field-error">The incident date cannot be in the future.</p>
-      }
-      @if (problem('incidentDate')) { <p class="field-error">{{ problem('incidentDate') }}</p> }
-    </div>
-  </div>
+    @if (files().length > 0) {
+      <ul class="file-list" data-testid="chosen-files" aria-label="Documents to attach">
+        @for (f of files(); track f; let i = $index) {
+          <li>
+            <app-icon [name]="f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf') ? 'file' : 'image'" />
+            <span class="file-name">{{ f.name }}</span>
+            <span class="muted">{{ formatSize(f.size) }}</span>
+            <button type="button" class="link" (click)="removeFile(i)" [attr.aria-label]="'Remove ' + f.name"><app-icon name="close" />Remove</button>
+          </li>
+        }
+      </ul>
+    }
+  </section>
 
-  <label for="description">What happened? <span class="muted">(at least 20 characters)</span></label>
-  <textarea id="description" formControlName="description" maxlength="4000"></textarea>
-  @if (form.controls.description.touched && form.controls.description.errors?.['minlength']) {
-    <p class="field-error">Please describe what happened in at least 20 characters.</p>
+  @if (submitted() && issues().length > 0) {
+    <div class="form-notice">
+      <div class="error problem-summary" role="alert" data-testid="problem-summary">
+        <div>
+          <strong>{{ issues().length === 1 ? 'Please fix this before submitting:' : 'Please fix these ' + issues().length + ' things before submitting:' }}</strong>
+          <ul>
+            @for (issue of issues(); track issue.id) {
+              <li><a [href]="'#' + issue.id" (click)="focusField($event, issue.id)">{{ issue.message }}</a></li>
+            }
+          </ul>
+        </div>
+      </div>
+    </div>
   }
-  @if (problem('description')) { <p class="field-error">{{ problem('description') }}</p> }
-
-  <label for="amountClaimed">Amount you are claiming</label>
-  <input id="amountClaimed" type="number" min="0.01" step="0.01" formControlName="amountClaimed" />
-  @if (form.controls.amountClaimed.touched && form.controls.amountClaimed.errors?.['amount']) {
-    <p class="field-error">Enter an amount greater than zero with at most two decimals.</p>
-  }
-  @if (problem('amountClaimed')) { <p class="field-error">{{ problem('amountClaimed') }}</p> }
-
   @if (error()) {
-    <p class="error" role="alert">{{ error() }}</p>
+    <div class="form-notice"><p class="error" role="alert">{{ error() }}</p></div>
   }
-  <p>
-    <button type="submit" class="primary" [disabled]="busy() || form.invalid">
-      {{ busy() ? 'Submitting…' : 'Submit claim' }}
-    </button>
-  </p>
+  <div class="form-actions">
+    <p class="muted">You can follow the claim's progress on its page once it is submitted.</p>
+    <div class="button-row">
+      <a class="btn" routerLink="/claims">Cancel</a>
+      <button type="submit" class="primary" [disabled]="busy()">
+        @if (progress(); as p) {
+          Uploading documents ({{ p.done }} of {{ p.total }})…
+        } @else {
+          {{ busy() ? 'Submitting…' : 'Submit claim' }}
+        }
+      </button>
+    </div>
+  </div>
 </form>

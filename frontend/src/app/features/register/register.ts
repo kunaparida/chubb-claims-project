@@ -3,11 +3,14 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
 import { fieldErrors, problemMessage } from '../../core/problem';
+import { AuthShell } from '../../shared/auth-shell';
+import { Icon } from '../../shared/icon';
+import { Logo } from '../../shared/logo';
 
 /** Public registration always creates a CLAIMANT (officers and managers are provisioned by the backend). */
 @Component({
   selector: 'app-register',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, AuthShell, Icon, Logo],
   templateUrl: './register.html',
 })
 export class Register {
@@ -16,6 +19,7 @@ export class Register {
   private readonly router = inject(Router);
 
   protected readonly busy = signal(false);
+  protected readonly showPassword = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly serverErrors = signal<Record<string, string>>({});
 

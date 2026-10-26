@@ -6,7 +6,7 @@
     }
   </div>
   @if (isClaimant()) {
-    <a routerLink="/claims/new"><button type="button" class="primary">Report an incident</button></a>
+    <a class="btn primary" routerLink="/claims/new"><app-icon name="plus" />Report an incident</a>
   }
 </div>
 
@@ -24,15 +24,19 @@
   <p class="error" role="alert">{{ error() }} <button type="button" class="link" (click)="load()">Retry</button></p>
 }
 @if (loading() && !result()) {
-  <p class="muted">Loading…</p>
+  <p class="loading"><span class="spinner"></span>Loading…</p>
 }
 
 @if (result(); as r) {
   @if (r.content.length === 0) {
-    <div class="card empty">
-      <p>No claims to show.</p>
+    <div class="card empty-state">
+      <div class="empty-icon"><app-icon name="file" /></div>
+      <h2>No claims to show</h2>
       @if (isClaimant()) {
-        <a routerLink="/claims/new">Report an incident</a>
+        <p>When you report an incident it appears here, with its status and history.</p>
+        <p><a class="btn primary" routerLink="/claims/new"><app-icon name="plus" />Report an incident</a></p>
+      } @else {
+        <p>Nothing matches this view yet.</p>
       }
     </div>
   } @else {
@@ -52,8 +56,8 @@
         <tbody>
           @for (c of r.content; track c.id) {
             <tr>
-              <td><a [routerLink]="['/claims', c.id]">{{ c.claimNumber }}</a></td>
-              <td>{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }}</td>
+              <td><a class="claim-link" [routerLink]="['/claims', c.id]">{{ c.claimNumber }}</a><span class="sub">{{ c.policyNumber }}</span></td>
+              <td><span class="type-tag"><app-icon [name]="c.claimType === 'MOTOR' ? 'car' : 'home'" />{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }}</span></td>
               <td>
                 <app-status-badge [status]="c.status" />
                 @if (isClaimant() && c.status === 'MORE_INFO_REQUIRED') {

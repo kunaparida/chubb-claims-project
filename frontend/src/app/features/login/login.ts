@@ -3,6 +3,9 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
 import { problemMessage } from '../../core/problem';
+import { AuthShell } from '../../shared/auth-shell';
+import { Icon } from '../../shared/icon';
+import { Logo } from '../../shared/logo';
 
 /** The backend seeds one officer and one manager for local use; claimants register themselves. */
 const DEMO_PASSWORD = 'ChangeMe123!';
@@ -13,7 +16,7 @@ const DEMO_ACCOUNTS = [
 
 @Component({
   selector: 'app-login',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, AuthShell, Icon, Logo],
   templateUrl: './login.html',
 })
 export class Login {
@@ -24,6 +27,7 @@ export class Login {
   protected readonly demo = DEMO_ACCOUNTS;
   protected readonly demoPassword = DEMO_PASSWORD;
   protected readonly busy = signal(false);
+  protected readonly showPassword = signal(false);
   protected readonly error = signal<string | null>(null);
 
   protected readonly form = this.fb.nonNullable.group({

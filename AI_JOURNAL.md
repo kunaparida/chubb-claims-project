@@ -5,7 +5,7 @@
 | **Project** | Claims Platform: `backend/` (Spring Boot, formerly `chubb-claims-backendService`) and `frontend/` (Angular, formerly `claim_management_UI`) |
 | **Author** | Kuna Parida |
 | **Document purpose** | Record of how AI assistance was used: the prompts that shaped the design, found a defect or changed the repository, what the AI produced, and what was accepted, challenged or overridden, with the reasoning. |
-| **Last updated** | 2026-10-24 |
+| **Last updated** | 2026-10-26 |
 
 This is the single journal for the whole submission (the backend and frontend journals merged). The author reviews and takes
 responsibility for every line in this repository. AI output is treated as a proposal, not a result, until a build, a test run or a manual
@@ -28,14 +28,16 @@ check has verified it. Each entry says what was **actually verified** and what w
 | 3 | The outbox proposal was **challenged** ("why not send to Kafka directly from the service?"); the answer (commit and send can disagree) held up, and the delivery guarantee and ordering rules were written down before it was kept. | D1 |
 | 4 | A unit test found a **real bug**: when an officer lost a pick-up race, the reload wiped the error message, so nobody would learn why. | F2 |
 | 5 | Writing the end-to-end guide exposed a **second real defect**: a stopped backend shows as `502` through the dev proxy, which the UI did not recognise. | F3 |
-| 6 | The AI's own wrong statements were caught and corrected: "Node is not installed", a login page that "signs in with one click", lists that "load one page at a time". | F1, F4 |
+| 6 | The AI's own wrong statements were caught and corrected: "Node is not installed", a login page that "signs in with one click" (it only fills in the credentials), lists that "load one page at a time". | F1, F4, F8 |
 | 7 | Seven tests failed on JDK 27; the cause (Byte Buddy) was **reproduced from the surefire reports**, not guessed. | Prompt 4 |
 | 8 | The AI converted the database to PostgreSQL; the author **overrode** it and kept H2. | F6 |
 | 9 | Reviewing the project against a scoring rubric found dead code, an unauthenticated database console and undocumented endpoints; all three were fixed and **verified on the running app**. | F7 |
+| 10 | After a UI redesign, looking at the **running app** found what 250 unit tests could not: a blank logo on phone screens (two logos shared one gradient id), a header four rows tall, wrapping claim numbers. All fixed and re-checked. | F8 |
+| 11 | A request for an *optional upload* had nothing to land on (the API could not store a file), so it was built end to end. The file type is judged from the file's **first bytes**, not its name. Live use then found a wrong download filename header, an unstyled button and a cramped phone layout (fixed twice), and the AI caught its own wrong error message in a guide by reading the handler before leaving it. | F9 |
 
-**Evidence rather than assertion:** 85 backend tests (97.0% line coverage, measured by JaCoCo), 216 frontend tests, a 28-check and a
+**Evidence rather than assertion:** 117 backend tests (97.1% line coverage, measured by JaCoCo), 312 frontend tests, a 28-check and a
 45-check scripted run against the real backend, a browser walkthrough, and a mutation check that deliberately broke a rule to prove the
-tests notice. What was *not* run (Docker, Kafka against a broker, dark mode, some screens in a browser) is listed in each entry.
+tests notice. What was *not* run (Docker, Kafka against a broker, the real file-chooser dialog, some screens in a browser) is listed in each entry.
 
 **Who did what**
 
@@ -53,7 +55,7 @@ tests notice. What was *not* run (Docker, Kafka against a broker, dark mode, som
 | **CHALLENGED** | AI output questioned or verified, then kept or changed. |
 | **OVERRODE** | The author decided differently from the AI. |
 
-**Prompt inventory:** the log includes the retained substantive backend prompts (1–4), reconstructed prompt summaries for major backend design decisions (D1–D4), and the frontend/integration/packaging/review prompts (F1–F7). Routine prompts (run this, fix that typo, re-format, "continue") are omitted unless they materially changed the implementation. Where wording was not retained, it is labelled as reconstructed rather than verbatim.
+**Prompt inventory:** the log includes the retained substantive backend prompts (1–4), reconstructed prompt summaries for major backend design decisions (D1–D4), and the frontend/integration/packaging/review prompts (F1–F9). Routine prompts (run this, fix that typo, re-format, "continue") are omitted unless they materially changed the implementation. Where wording was not retained, it is labelled as reconstructed rather than verbatim.
 
 **Decision lines.** For entries the author has not yet written up, the AI adds a *Proposed* verdict with its reasons, taken from the record (what was checked, what was corrected). It is a suggestion only: the author confirms it or replaces it with their own words.
 
@@ -66,6 +68,8 @@ tests notice. What was *not* run (Docker, Kafka against a broker, dark mode, som
 | 3. Frontend | F1-F3 | `frontend/` (was `C:\project\claim_management_UI`) | `CLAUDE.md` first, then all 19 endpoints integrated into one Angular app for three roles, then a manual end-to-end script. |
 | 4. Packaging | F4-F5 | repository root | One repository with one README, ARCHITECTURE and this journal; then Docker and a Kafka configuration check. |
 | 5. Review | F6-F7 | `backend/`, root | A PostgreSQL attempt the author reversed; then a review of the whole project against a scoring rubric, with fixes. |
+| 6. UI redesign | F8 | `frontend/` | A professional look (logo, design system, light and dark), and a new report form: market list, 7-day date window, generated policy number. |
+| 7. Documents | F9 | `backend/`, `frontend/`, root documents | Optional document upload (three new endpoints, a section on the report form, a Documents box on the claim page) and a message for every missing or invalid field. Takes the API from 19 to 22 endpoints. |
 
 ## 3. Key outcomes
 
@@ -73,10 +77,11 @@ tests notice. What was *not* run (Docker, Kafka against a broker, dark mode, som
   in-memory H2 database.
 - Workflow rules enforced in the service layer; invalid transitions raise `BusinessException`.
 - Audit history and a transactional outbox for status-change events (log publisher by default, Kafka optional).
-- `mvn test`: 85 tests, 0 failures (42 before the submission-repository work), with a JaCoCo coverage report: 97.0% of lines, 85.7% of branches.
+- `mvn test`: 117 tests, 0 failures (42 before the submission-repository work), with a JaCoCo coverage report: 97.1% of lines, 86.9% of branches.
 - Every endpoint documented in OpenAPI (enforced by a test); `POST /api/claims` answers `201` with a `Location` header; the H2 console is off by default.
-- An Angular 22 UI (zoneless, signals) integrating all 19 endpoints for the three roles in one app: 216 Vitest tests and a clean strict
-  production build (about 293 kB initial).
+- Optional claim documents (PDF, JPG or PNG; 5 files of 5 MB; type judged from the file's contents), visible to whoever can see the claim.
+- An Angular 22 UI (zoneless, signals) integrating all 22 endpoints for the three roles in one app: 312 Vitest tests and a clean strict
+  production build (about 316 kB initial).
 - Both applications, their histories and one set of documents in a single repository, with a Docker Compose stack (backend, frontend,
   Kafka). What has not been run or clicked through is stated in the entries and in `ARCHITECTURE.md` part E.
 
@@ -424,7 +429,7 @@ and a root `CLAUDE.md` added. The two original repositories were not modified.
    no-checkout clone and sparse checkout, and the originals were checked to be untouched. Two shell commands run in parallel once shared a
    working directory and reported the wrong repository; every later command used `git -C <path>`.
 3. **Mistakes in the AI's first drafts of the new documents**, found by checking them against the source: Node 20+ (see F3), a login page
-   that "signs in with one click" (the demo panel only fills in the email), and lists that "load one page at a time" (they are paged,
+   that "signs in with one click" (the demo panel fills in the email and password but does not sign in; this correction was itself imprecise and was fixed in F8), and lists that "load one page at a time" (they are paged,
    10 per page).
 4. **The history did not travel with the folder.** The repository later pushed to GitHub (`chubb-claims-project`) was made from a copy
    of the working folder and starts with a single commit holding all 147 files, so the imported development history exists only in
@@ -552,6 +557,132 @@ full-stack assessment brief, and the repository itself.
 **Decision:** `Pending author review`. *Proposed by the AI:* **ACCEPTED**: each change was verified by a test or on the running application
 before it was kept.
 
+## F8: Redesign the UI, and change the report form
+
+**Prompt** (verbatim, spelling as sent)
+```text
+in frontend part the design is very simple and average also in Repost an incident screen Market should be dropdown with 6 market value like singapure , honkon , Indian etc also we can select past 1 week date only not more than 1 week incident we can select also policy number can auto generated please taken care this , please make the UI more attractive and proffesional now its very average and simple the login page also not looking good if possible add some logo as well
+```
+
+**Result** (frontend only; the backend and its API were not touched)
+
+* **Design system** (`styles.css`): colour, radius and shadow tokens; light and dark themes that follow the operating system; a dark header with
+  role navigation and a user chip; cards, forms, buttons, tables, badges, a claim progress bar, a history timeline, dashboard tiles with
+  exposure bars; responsive down to a phone.
+* **Logo and icons:** a shield-and-tick mark drawn for this project (not any company's logo), an inline SVG icon set, `public/logo.svg` as the
+  favicon, page title "Claims Platform". No UI library, image or font is downloaded.
+* **Sign-in and registration:** a split screen with a brand panel, and show/hide password.
+* **Report an incident**, rebuilt in three sections:
+  * **Market** is a dropdown of six: Singapore, Hong Kong, India, Malaysia, Thailand, Indonesia. The brief says Chubb has six markets but does
+    not name them, so this list is the AI's assumption.
+  * **Incident date** can only be from 7 days ago to today, with a hint and a clear message when it is outside. "Today" is the earlier of the viewer's date
+    and the UTC date, so a claimant in Asia early in the morning is never offered a date that a UTC server (such as the Docker backend) would refuse as
+    "in the future".
+  * **Policy number** is generated (`POL-<year>-<six digits>`), read-only, with a button for a new one.
+* **Claim page:** a progress bar (Submitted, Under review, Decision, Settled; a warning state for "more information", a red end for "rejected");
+  claim and queue lists got icons, policy numbers and "waiting 3 h".
+* **Tests: 216 to 250** (specs for the markets, dates, policy number and progress helpers; the report-form spec rewritten). The E2E guide (Parts 0
+  and 3), README (with screenshots), ARCHITECTURE (C.1, C.7) and the `CLAUDE.md` files were updated.
+
+**Corrections**
+
+1. **The three form rules are UI-only.** The API still accepts any two-letter market, any past date and any policy number, so the 7-day limit can be
+   bypassed by calling the API. This is stated in the README, in ARCHITECTURE (C.7 and part E) and in `frontend/CLAUDE.md`, not presented as a business rule
+   the system guarantees.
+2. **Found only by looking at the running app, not by the unit tests:** the logo tile was **blank on phone-width sign-in** (the brand panel is hidden
+   there, and the visible logo reused the hidden one's gradient id); the car icon read as a headset; claim numbers wrapped in the phone queue; the phone
+   header took four rows. All four were fixed and looked at again.
+3. **An earlier statement of the AI was wrong again.** In F4 the AI said the demo-accounts buttons "only fill in the email". They fill in the email
+   **and** the password (the code and its test show it) but do not sign in. Corrected in the README, the E2E guide and F4.
+4. An early draft of a form hint told claimants to enter the amount "in the currency of the market". The API has no currency, so the hint was replaced
+   by a factual one ("greater than zero, with at most two decimals").
+
+**Verification**
+
+* **250 tests pass** in 19 files; the strict production build is clean (initial 312.6 kB, 85 kB over the wire).
+* **The running application** (backend jar plus the dev server), as claimant, officer and manager: the sign-in page; the report form (the dropdown's
+  options and the date limits were read back from the page, an old date showed its message and kept "Submit claim" disabled, then a valid claim with
+  a regenerated policy number was submitted and its page opened); the claims list; claim pages in the submitted, waiting-for-information and
+  under-review states; the officer's claim page; the manager dashboard in light and dark mode; and the work queue and the sign-in and registration
+  pages at phone width.
+* **Not verified:** officer approve, reject and settle, and the manager's assign picker, were not clicked in this pass; no automated accessibility
+  check (contrast, keyboard use) was run, only a look by eye; only a Chromium-based browser was used (the CSS uses `color-mix()`, which needs a current
+  browser).
+
+**Decision:** `Pending author review`. *Proposed by the AI:* **ACCEPTED**, with two things for the author to confirm: the six-market list (an
+assumption) and whether the 7-day and generated-policy rules should also be enforced by the backend.
+
+---
+
+## F9: Add optional document upload, and explain every form error
+
+**Prompt** (verbatim, spelling as sent)
+```text
+there is no document upload option in Report incident screen please add this option and make it optional and in UI screen if any required field missing then show a proper error desc
+```
+
+**This was a design question, not only a UI task.** The API had no way to receive a file, so a button on the form would have had nothing to send
+to. The AI said so and asked how far to go; the author chose the full feature (backend and frontend) over a UI-only placeholder.
+
+**Result**
+
+* **Backend** (`backend/`): `POST /api/claims/{id}/documents` (one file per call, `multipart/form-data`), `GET .../documents` (details only) and
+  `GET .../documents/{documentId}` (the file, as an attachment). New `ClaimDocument` entity and table, `ClaimDocumentService` (all the rules),
+  `ClaimDocumentController`, `ClaimService.viewableClaim` (so a document is visible to exactly whoever can see the claim), three new error handlers.
+  The API goes from 19 to 22 endpoints; `ApiContractTest` pins the new count and the "Documents" tag.
+* **The rules the AI proposed** (the author to confirm): the claimant who owns the claim can attach, and only while it is not rejected or settled;
+  officers and managers can read but not add; at most 5 files of 5 MB each; PDF, JPG or PNG, **decided from the file's first bytes** and the extension
+  must agree (a name or a browser-reported type can be anything, so a script renamed `estimate.pdf` is refused); the name is stripped of directories;
+  downloads are sent as an attachment with `nosniff` and `no-store`; files are stored as a BLOB in H2 (a stand-in for object storage).
+* **Frontend** (`frontend/`): a fourth section on the report form, "Supporting documents (Optional)", with a drop box, a file list and a reason for
+  every refused file; each missing or invalid required field now has its own message (`aria-invalid`, `aria-describedby`), an error summary lists
+  them as links in page order, and focus moves to the first. The files are sent one by one *after* the claim is created, so a failed upload never
+  undoes the claim: it is reported on the claim page, which also has a Documents box (download for everyone who can see the claim, "Add documents"
+  for the owner while the claim is open). `canAddDocuments` lives in the action table; saving a download and the one-time message to the next page are
+  two small services (`save-file.ts`, `flash.ts`); nginx's body limit was raised to 7 MB, because its 1 MB default would refuse uploads in Docker.
+* **This reverses a behaviour from F8.** There, an invalid form left "Submit claim" disabled. It now stays clickable and explains what is wrong,
+  because a disabled button says nothing about *what* is missing, which is what the author asked for.
+* **Tests:** backend 85 to 117, frontend 250 to 312. **Documents updated:** README (one new screenshot, one replaced), ARCHITECTURE (A.1, B.2, B.5 to B.9, C.1 to C.3,
+  C.5, C.7, C.8, E), all three `CLAUDE.md` files, `DOCKER.md`, the E2E guide (steps 3.1 to 3.3, 5.4, 6.5A, 7.9, Part 10) and the Swagger guide (steps 12A to 12D, 23A).
+
+**Corrections**
+
+1. **The AI broke its own spec with a PowerShell here-string.** It wrote `claim-actions.spec.ts` through a double-quoted here-string, which interpolated
+   `${viewer.role} on ${status}` and broke the template literal; the test run caught it and the Edit tool fixed it. Code containing `$` or backticks is now
+   written with single-quoted here-strings or Edit.
+2. **A wrong download header, found by a live request, not by a test.** The first version sent an RFC 2047 encoded `=?UTF-8?Q?...?=` filename even for a
+   plain name such as `estimate.pdf`. It now sends a plain `filename="..."` for simple ASCII names and the encoded form only for others, with an
+   integration test for both.
+3. **"Choose files" showed as bare text:** the button styles covered `button` and `a.btn` but not `label.btn`. Found by looking at the running form.
+4. **The phone layout was cramped, and the first fix was incomplete.** Looking at the claim page at 375 px showed file names breaking mid-word
+   (`damage-` / `photo.png`) and the details wrapping to four lines beside the Download button. The first CSS fix covered only the claim page's rows; the
+   staged-files list on the form still wrapped a long name over five lines until a second look. Both re-checked at 375 px in dark mode.
+5. **The AI wrote a wrong error message into a guide.** It first put "is larger than 5 MB" in the Swagger guide for an oversized upload. Reading the
+   exception handler before leaving the line showed that, with the default settings, the web server stops the request earlier and the text is "The uploaded
+   file is larger than the size limit". Corrected. (The same habit applied to the E2E guide: its "Submit claim is disabled" and old messages were rewritten from
+   the strings in the code, not from memory.)
+6. **A client artefact, not a defect:** posting an over-size file from .NET's `HttpClient` reported a stream error, while `curl` received the clean `413`
+   problem document. It was treated as the client's behaviour; the form checks the size before sending, so a claimant does not meet it.
+
+**Verification**
+
+* **Backend:** 117 tests, 0 failures, re-run on 2026-10-26 in a scratch copy (so the running app's build output was not touched); JaCoCo 97.1% of lines (639/658),
+  86.9% of branches (133/153). Live requests to the running backend (PowerShell and curl) covered upload, refusal, download and the access rules; the integration
+  tests cover the same cases.
+* **Frontend:** 312 tests in 20 files; the strict production build is clean (315.80 kB initial, 85.90 kB over the wire).
+* **The running application** (backend jar plus dev server): an empty submit showed four field messages and a summary of four links with focus on the first; a valid claim
+  with a PDF and a PNG chosen (a `.txt` and a 6 MB file listed as refused, each with its reason) was submitted, and its page showed "Claim submitted with 2 documents." and
+  the Documents box; Download gave the right names, sizes, types and first bytes (the click was intercepted so no file was written); "Add documents" attached a JPEG and
+  refused a PNG named `.pdf` with the server's message; the officer saw the documents and no "Add documents"; the report form's documents section and the claim page were looked
+  at in dark mode at phone width.
+* **Not verified:** the real file-chooser dialog and drag-and-drop (files were handed to the form by a script, because the built-in browser has no chooser); a closed
+  (rejected or settled) claim and the five-file limit in a browser (unit and integration tests only); a file over 5 MB through a browser; the nginx 7 MB limit
+  (Docker has never been run here); a download saved to disk. The Postman collection was not extended. The new E2E steps were checked piece by piece, not replayed as
+  one flow. There is no virus scan, and the files are lost on restart.
+
+**Decision:** `Pending author review`. *Proposed by the AI:* **ACCEPTED**, with these for the author to confirm: the limits (5 files, 5 MB, PDF, JPG, PNG); that officers and
+managers can read but not add documents; that there is no delete or replace; and the BLOB-in-H2 storage as a stand-in for object storage.
+
 ---
 
 # Part D: Open Questions for the Backend
@@ -578,12 +709,13 @@ Backend:
 | Messaging | The Kafka publisher is unit-tested with a mocked template; no result of running it against a real broker is recorded. |
 | Database | In-memory H2 with `ddl-auto=update` and no migration tooling: **all data is lost on restart**. A PostgreSQL example is only a comment in `application.properties` (no driver is a dependency). The H2 console is opt-in (`H2_CONSOLE_ENABLED`, off by default); when on it needs no sign-in (local development only). |
 | Secrets | Default JWT secret and seeded-account password are for local use only. |
-| Quality metrics | JaCoCo reports 97.0% line and 85.7% branch coverage (2026-10-24). It is a report, not a build gate, and there is no CI. |
+| Documents | Uploaded files are stored as BLOBs in the in-memory database (lost on restart, read fully into memory), are not virus-scanned, are typed by their first bytes only, and cannot be removed or replaced. Limits: 5 files of 5 MB per claim. |
+| Quality metrics | JaCoCo reports 97.1% line and 86.9% branch coverage (2026-10-26). It is a report, not a build gate, and there is no CI. |
 
 Frontend and integration (full table, with a next step for each, in `ARCHITECTURE.md` part E): no CORS on the backend, so the UI needs the dev
 proxy or a same-origin gateway; the action table is a copy of backend rules; no currency on claims; the JWT is kept in `localStorage`;
-officer approve/reject/settle, the manager assign picker, dark mode and narrow layouts were not clicked through in a browser; no
-browser-level automated tests.
+officer approve/reject/settle and the manager assign picker were not clicked through in a browser (dark mode and phone width were looked at by eye on 2026-10-26); the
+real file-chooser dialog and drag-and-drop were not exercised; no browser-level automated tests.
 
 ---
 
@@ -594,7 +726,7 @@ These are the author's to write; the AI has not filled them in because it would 
 1. **Pre-existing commits.** The backend repository already had commits before the submission work (`Initial commit` to `pagination
    added`). State which parts were AI-generated, which were written by hand, and how they relate to the Phase 1 build.
 2. **F1 prompt text.** If an exact transcript is available, replace the clearly labelled reconstruction with it; otherwise keep the authenticity note.
-3. **Decisions for F1 to F7** are all `Pending author review`, each with a verdict *proposed by the AI*. Confirm or change every one in your
+3. **Decisions for F1 to F9** are all `Pending author review`, each with a verdict *proposed by the AI*. Confirm or change every one in your
    own words (one or two sentences: what you accepted, what you challenged or overrode, and why). **This is the part of the journal only you
    can write, and the part the brief asks for.**
 4. **F3 was reconstructed.** Read it and correct anything that does not match what you remember of that session.
@@ -609,13 +741,20 @@ These are the author's to write; the AI has not filled them in because it would 
    `spring.kafka.producer.properties.max.block.ms=10000` to the backend.
 8. **F6 reason.** Write why you removed PostgreSQL ("some reason" is what was recorded); the panel is likely to ask why H2.
 9. **Fresh-clone check.** Clone the repository somewhere clean, run `npm install` in `frontend/`, and follow `README.md` once.
+10. **The report form's assumptions (F8).** Confirm the six markets (the brief names none), and decide whether the 7-day limit and the generated
+    policy number should also be enforced by the backend. Also run the E2E guide once in a browser: its Parts 0 and 3 were rewritten for the new form
+    but the whole flow was not re-run.
+11. **Documents (F9).** Confirm the limits (5 files, 5 MB, PDF/JPG/PNG), that officers and managers can only read documents, and that there is no delete.
+    Try the upload with real files through the browser's own file chooser and by drag-and-drop (the AI could only hand files to the form by script), and
+    follow E2E steps 3.2A, 6.5A and 7.9 once. Decide whether the Postman collection should get the three new requests, and what you would say about
+    storing files in the database (the answer in `ARCHITECTURE.md` B.9 and part E: fine for an in-memory demo, object storage for real use).
 
 ---
 
 # Appendix: Template for New Entries
 
 ```markdown
-## F8: <short title>
+## F10: <short title>
 
 **Prompt** (verbatim, or "reconstructed prompt summary (not verbatim)"): <what was typed>
 

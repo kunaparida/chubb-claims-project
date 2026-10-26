@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import {
   AuthResponse,
   Claim,
+  ClaimDocument,
   ClaimHistoryEntry,
   ClaimStatus,
   CreateClaimRequest,
@@ -101,6 +102,24 @@ export class ApiService {
 
   settle(id: number, note: string): Observable<Claim> {
     return this.http.put<Claim>(`/api/claims/${id}/settle`, { note });
+  }
+
+  // ---- claim documents ----
+  /** Details of the files attached to a claim (not their bytes). Anyone who can see the claim can list them. */
+  documents(claimId: number): Observable<ClaimDocument[]> {
+    return this.http.get<ClaimDocument[]>(`/api/claims/${claimId}/documents`);
+  }
+
+  /** Attaches one file as multipart/form-data in the `file` field. Claimant only, while the claim is open. */
+  uploadDocument(claimId: number, file: File): Observable<ClaimDocument> {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return this.http.post<ClaimDocument>(`/api/claims/${claimId}/documents`, body);
+  }
+
+  /** The file itself. The bearer token travels in the header, so a plain link would not work: the bytes are fetched, then saved. */
+  downloadDocument(claimId: number, documentId: number): Observable<Blob> {
+    return this.http.get(`/api/claims/${claimId}/documents/${documentId}`, { responseType: 'blob' });
   }
 
   // ---- manager dashboard ----

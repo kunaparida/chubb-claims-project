@@ -41,6 +41,31 @@ export function problemMessage(err: unknown, fallback = 'Something went wrong. P
   return fallback;
 }
 
+function readText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
+
+/**
+ * A failed file download arrives with its body as a Blob (the request asked for a Blob), so the backend's explanation is hidden
+ * inside it. This reads it back so `problemMessage` can show the real reason; if the body is not JSON the error is returned as it was.
+ */
+export async function readBlobProblem(err: unknown): Promise<unknown> {
+  if (err instanceof HttpErrorResponse && typeof Blob !== 'undefined' && err.error instanceof Blob) {
+    try {
+      const body: unknown = JSON.parse(await readText(err.error));
+      return new HttpErrorResponse({ error: body, headers: err.headers, status: err.status, statusText: err.statusText, url: err.url ?? undefined });
+    } catch {
+      return err;
+    }
+  }
+  return err;
+}
+
 /** Per-field validation messages (HTTP 400), keyed by request field name, to show next to the inputs. */
 export function fieldErrors(err: unknown): Record<string, string> {
   if (err instanceof HttpErrorResponse && err.status === 400) {

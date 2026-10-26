@@ -7,6 +7,7 @@ import { AuthService } from '../../core/auth.service';
 import { CLAIM_STATUSES, Claim, ClaimStatus, PageResponse } from '../../core/models';
 import { problemMessage } from '../../core/problem';
 import { AmountPipe } from '../../shared/amount.pipe';
+import { Icon } from '../../shared/icon';
 import { StatusBadge } from '../../shared/status-badge';
 
 const PAGE_SIZE = 10;
@@ -17,7 +18,7 @@ const PAGE_SIZE = 10;
  */
 @Component({
   selector: 'app-claims-list',
-  imports: [RouterLink, DatePipe, AmountPipe, StatusBadge],
+  imports: [RouterLink, DatePipe, AmountPipe, StatusBadge, Icon],
   templateUrl: './claims-list.html',
 })
 export class ClaimsList implements OnInit {

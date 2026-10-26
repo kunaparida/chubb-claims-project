@@ -75,6 +75,33 @@ describe('ApiService', () => {
     bare.flush({});
   });
 
+  it('documents -> GET /api/claims/{id}/documents', () => {
+    api.documents(42).subscribe();
+    const req = http.expectOne('/api/claims/42/documents');
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
+  });
+
+  it('uploadDocument -> POST multipart/form-data with the file in the "file" field', () => {
+    const file = new File(['%PDF-1.4'], 'estimate.pdf', { type: 'application/pdf' });
+    api.uploadDocument(42, file).subscribe();
+    const req = http.expectOne('/api/claims/42/documents');
+    expect(req.request.method).toBe('POST');
+    const body = req.request.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect(Array.from(body.keys())).toEqual(['file']);
+    expect((body.get('file') as File).name).toBe('estimate.pdf');
+    req.flush({});
+  });
+
+  it('downloadDocument -> GET the file as a blob (so the bearer token can be sent)', () => {
+    api.downloadDocument(42, 7).subscribe();
+    const req = http.expectOne('/api/claims/42/documents/7');
+    expect(req.request.method).toBe('GET');
+    expect(req.request.responseType).toBe('blob');
+    req.flush(new Blob(['x']));
+  });
+
   it('queue -> GET /api/claims/queue with paging', () => {
     api.queue(1, 5).subscribe();
     const req = http.expectOne((r) => r.url === '/api/claims/queue');

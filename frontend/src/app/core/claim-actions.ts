@@ -75,6 +75,14 @@ export function allowedActions(claim: Claim, viewer: Viewer): ClaimActionId[] {
   }
 }
 
+/**
+ * Who may attach documents: the claimant who owns the claim, until it is closed (rejected or settled), as on the backend.
+ * Listing and downloading are open to everyone who can see the claim, so they need no rule here.
+ */
+export function canAddDocuments(claim: Claim, viewer: Viewer): boolean {
+  return viewer.role === 'CLAIMANT' && claim.claimantId === viewer.id && !TERMINAL.includes(claim.status);
+}
+
 export function isTerminal(status: ClaimStatus): boolean {
   return TERMINAL.includes(status);
 }
