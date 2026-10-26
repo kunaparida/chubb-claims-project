@@ -793,7 +793,11 @@ now in our project we implemented kafka as well please verify the project once a
 * **Backend** (scratch copy, so the running app was untouched): 118 tests, 0 failures; 97.1% of lines (639/658), 86.9% of branches (133/153).
 * **Frontend:** 312 tests in 20 files, 0 failures; the production build is clean (315.83 kB first load).
 * **Documents:** 65 relative links and images across 8 documents were checked and all point to files that exist (one apparent anchor failure was my checker mishandling a dash, not a real problem). Each of the three SVG files is valid XML and was looked at in a browser. The image links from the README all resolve.
-* **Not verified:** the Mermaid diagrams I added or changed were not drawn here (no Mermaid renderer is available offline), so they follow the syntax of the existing ones but should be glanced at on GitHub. Docker Compose and the two new containers still have not been run. Nothing about a real mail provider has changed.
+* **Mermaid diagrams:** a follow-up check (see F11b below) rendered all four Mermaid blocks in the README and `ARCHITECTURE.md` with Mermaid 11.4.1 in a browser: 4 of 4 parse and draw with no error.
+* **Not verified:** Docker Compose and the two new containers still have not been run. Nothing about a real mail provider has changed.
+
+**F11b: the README update was lost, and was redone.** The author's next step merged branches (pull requests #8 and #9). The commit that followed took in my changes to every document **except** `README.md`, which went back to the older text (85 and 216 tests, no notification section, no screenshots). The author asked to verify the README and **not to remove its diagrams**.
+So the README was updated again, this time checking the file on disk afterwards. Both diagrams are still there: the architecture flowchart keeps its plain style and gains three nodes (notification service, mail inbox, dead-letter topic), and the claim-lifecycle diagram keeps all its states and now has a label on each arrow ("start review", "approve", and so on). The new README has 2 Mermaid diagrams, as before. 23 links and images were checked and all resolve, and no old figures remain.
 
 **Decision:** `Pending author review`. *Proposed by the AI:* **ACCEPTED**, with these for the author to confirm: that the three SVGs I drew are acceptable stand-ins (or replace them with your own), that the screenshots belong back in the README, and that the section "10.6" and the extra limitations belong in `ARCHITECTURE.md`.
 
@@ -866,8 +870,8 @@ These are the author's to write; the AI has not filled them in because it would 
     the compose file and the two new containers have never been run. Try one real SMTP account through the `MAIL_*` variables. Confirm the decisions F10 lists (separate
     service; the claimant's address on the topic; in-memory duplicate protection), and decide whether the extra Maven build tooling that was downloaded is acceptable.
     Then follow E2E Part 13 once.
-13. **Final check (F11).** Look at the three diagrams in `docs/diagrams/` and at the Mermaid diagrams in the README and `ARCHITECTURE.md` on GitHub (they were not
-    drawn in this session). Replace the three SVGs with your own if you have them. Check the README still reads the way you want, since your last commit had replaced it.
+13. **Final check (F11).** Look at the three diagrams in `docs/diagrams/` on GitHub (the Mermaid diagrams were checked in a browser with Mermaid 11.4.1, the SVGs by eye). Replace the three SVGs with your own if you have them.
+    Make sure the updated `README.md` is part of your next commit: it was left out once and had to be redone (F11b).
 
 ---
 
