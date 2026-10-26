@@ -25,7 +25,7 @@ A small full-stack claims platform that replaces scattered claim tracking with *
 
 | Role | What they can do |
 |---|---|
-| **Claimant** | Register, submit incidents (optionally with photos, estimates or reports attached), track claims and history, respond to information requests, add documents, and read decisions |
+| **Claimant** | Register, submit incidents (optionally with photos, estimates or reports attached), track claims and history, respond to information requests, add documents, read decisions, and **get an email each time their claim changes status** |
 | **Claims officer** | Work the oldest-first queue, pick up or review claims, read and download the claimant's documents, request information, approve or reject claims, and mark approved claims as settled |
 | **Manager** | View all claims and their documents, assign claims to officers, and review workload, liability by market/type, and officer performance |
 
@@ -48,16 +48,18 @@ A small full-stack claims platform that replaces scattered claim tracking with *
 | Frontend | Angular 22, standalone components, signals, zoneless change detection; a hand-built design system (light and dark themes, responsive layout, SVG logo and icons, no UI library) |
 | Persistence | In-memory H2 (the only database in use; data resets on restart). PostgreSQL is only a commented datasource example: no driver is included |
 | Events | Transactional outbox with log publisher by default and optional Kafka publisher |
+| Notifications | A separate **notification service** (Spring Boot, Spring Kafka, Spring Mail) that consumes the status-change events and emails the claimant; retries, a dead-letter topic and duplicate protection; Mailpit as the local inbox in Docker |
 | API documentation | OpenAPI / Swagger UI: every endpoint has a summary and documented error responses, and the request bodies carry examples |
 | Packaging | Docker Compose configuration (execution still needs environment validation) |
 
-> **Verification note:** Backend tests and coverage were re-run on 2026-10-26 (117 tests passing; JaCoCo 97.1% line coverage, JDK 21). The 312 frontend tests and the production build were re-run the same day. The redesigned screens were looked at in a browser (light, dark, phone width) on 2026-10-26, and so was the document upload: attaching files, submitting, downloading, the officer's read-only view, and the documents sections of both the report form and the claim page in dark mode at phone width. Files were handed to the form by a script, because the built-in browser has no file chooser; the real chooser dialog and drag-and-drop were not exercised. Docker Compose and publishing to a real Kafka broker remain unverified in the available evidence.
+> **Verification note:** Backend tests and coverage were re-run on 2026-10-26 (118 tests passing; JaCoCo 97.1% line coverage, JDK 21). The notification service's 76 tests passed the same day, and the real backend, notification service, a Kafka broker and an SMTP server were run together (outside Docker). The 312 frontend tests and the production build were re-run the same day. The redesigned screens were looked at in a browser (light, dark, phone width) on 2026-10-26, and so was the document upload: attaching files, submitting, downloading, the officer's read-only view, and the documents sections of both the report form and the claim page in dark mode at phone width. Files were handed to the form by a script, because the built-in browser has no file chooser; the real chooser dialog and drag-and-drop were not exercised. Docker Compose and publishing to a real Kafka broker remain unverified in the available evidence.
 
 ## Repository layout
 
 ```
 backend/        Spring Boot service      src/, pom.xml, postman/, CLAUDE.md
 frontend/       Angular app              src/, angular.json, proxy.conf.json, CLAUDE.md
+notification-service/  Kafka consumer + email   src/, pom.xml, Dockerfile, CLAUDE.md
 docs/           screenshots/             (the images in this README)
                 SWAGGER-TEST-GUIDE.txt   (API walkthrough in Swagger)
                 E2E-VALIDATION-FLOW.txt  (25-30 minute manual test script for the whole system)
@@ -111,17 +113,17 @@ environment variable, or switch the seeded accounts off with `BOOTSTRAP_USERS=fa
 > cannot call port 8080 directly (the browser blocks the cross-origin call). `npm start` proxies `/api` to the backend
 > (`frontend/proxy.conf.json`), so always use `http://localhost:4200`. See [ARCHITECTURE.md](ARCHITECTURE.md), part D.
 
-## Run with Docker Compose (backend + frontend + Kafka)
+## Run with Docker Compose (backend + notification service + frontend + Kafka)
 
-> **Validation status:** Docker and Kafka configuration is documented, but the available development record does not contain a successful `docker compose up` run. Treat the container workflow as pending validation until it has been built and tested in your environment.
+> **Validation status:** Docker and Kafka configuration is documented, but the available development record does not contain a successful `docker compose up` run. Treat the container workflow as pending validation until it has been built and tested in your environment. (The backend, the notification service and a Kafka broker were run together outside Docker on 2026-10-26; see [Email notifications](#email-notifications).)
 
-With Docker Desktop installed and ports 4200, 8080 and 9094 free, the following command is intended to build and start the application stack, including Kafka for claim events:
+With Docker Desktop installed and ports 4200, 8025, 8080 and 9094 free, the following command is intended to build and start the application stack, including Kafka for claim events, the notification service and a local inbox for its emails:
 
 ```bash
 docker compose up --build -d
 ```
 
-Then open <http://localhost:4200>. **[DOCKER.md](DOCKER.md)** has the full steps: installing WSL 2 and Docker Desktop, checking the install,
+Then open <http://localhost:4200>, and the emails the notification service sends at <http://localhost:8025> (Mailpit; nothing is delivered to a real address). **[DOCKER.md](DOCKER.md)** has the full steps: installing WSL 2 and Docker Desktop, checking the install,
 watching events arrive in Kafka, every day-to-day command, a Kafka configuration check, and troubleshooting. The stack is intended to run the backend (in-memory H2 database), the frontend behind nginx, and a single-node Kafka broker. The H2 console is off unless you start the stack with `H2_CONSOLE_ENABLED=true`; it needs no sign-in and must not be exposed in a shared or production environment. See `DOCKER.md` for setup and verification steps.
 
 ## Validate the application end to end
@@ -207,20 +209,45 @@ de-duplication; the claim id is the Kafka key so one claim's events stay in orde
 | `app.events.topic` (`EVENTS_TOPIC`) | `claims.claim-status-changed` | Target topic |
 | `app.outbox.poll-ms` (`OUTBOX_POLL_MS`) | `5000` | Relay interval |
 
-The Kafka publisher is wired and unit-tested but has **not** been run against a real broker; the Docker stack above provides one, and
-`DOCKER.md` part 5 is how to prove it.
+Each event now also carries the claimant's `claimantEmail` and `claimantName`, so a consumer can write to the claimant without calling back
+(personal data on the topic: see [ARCHITECTURE.md](ARCHITECTURE.md), part E).
+
+The Kafka publisher is unit-tested with a mock, and was also run against a real Kafka broker (started inside a JVM, not the Docker stack) on
+2026-10-26. The Docker stack provides a broker too, and `DOCKER.md` part 5 is how to prove that setup.
+
+## Email notifications
+
+`notification-service/` is a separate Spring Boot application (port 8081, no database). It reads the topic above and emails the **claimant** each
+time their claim changes status: claim received, under review, more information needed (with a link to answer), back under review, approved,
+rejected, settled. Each email has a plain-text and an HTML part and links to the claim page. A failed email is retried (1 s, 2 s, 4 s), then the record is
+parked on a dead-letter topic; a repeated event is emailed once; a restart resumes where it stopped. Details: [ARCHITECTURE.md](ARCHITECTURE.md), B.10.
+
+It only works when the backend publishes to Kafka, so the easiest way to see it is Docker Compose (above): change a claim's status in the app, then open
+the Mailpit inbox at <http://localhost:8025>. To run it by hand, you need a Kafka broker you provide:
+
+```bash
+# the backend must publish to Kafka
+cd backend              && EVENTS_PUBLISHER=kafka SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 mvn spring-boot:run
+# the service (SMTP on localhost:1025 by default; NOTIFICATIONS_MAIL_MODE=log prints the emails instead of sending them)
+cd notification-service && SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 NOTIFICATIONS_MAIL_MODE=log mvn spring-boot:run
+```
+
+(on Windows PowerShell set the variables with `$env:NAME = "value"` first). To send real email, set `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`,
+`MAIL_PASSWORD`, `MAIL_AUTH=true`, `MAIL_STARTTLS=true` and `MAIL_FROM` in the environment; credentials are never read from a file. Without Kafka or Docker you can
+still see it work: `cd notification-service && mvn test` runs a real Kafka broker and a real SMTP server inside the tests.
 
 ## Build and test
 
 ```bash
-cd backend  && mvn test                         # 117 unit + Spring Boot integration tests (H2) and the JaCoCo coverage report
+cd backend  && mvn test                         # 118 unit + Spring Boot integration tests (H2) and the JaCoCo coverage report
+cd notification-service && mvn test             # 76 tests, with a real Kafka broker and SMTP server started inside the tests (about a minute)
 cd frontend && npm test -- --no-watch           # Vitest: 312 unit/component tests
 cd frontend && npm run build                    # strict production build
 ```
 
 Backend tests cover the service rules, the audit recorder, the outbox relay and publishers, validation, the API contract (the `Location`
 header, the H2 console being closed by default, every endpoint documented), the document upload rules (file type from contents, size and
-count limits, who may attach, closed claims) and the end-to-end Spring Boot flows (117 tests).
+count limits, who may attach, closed claims), the fields the published event must keep, and the end-to-end Spring Boot flows (118 tests).
 `mvn test` also writes the coverage report to `backend/target/site/jacoco/index.html`; measured on 2026-10-26 (JDK 21, JaCoCo 0.8.15):
 **97.1% of lines, 86.9% of branches**. Frontend tests cover the API contract (every verb, path and body),
 the interceptor and guards, an exhaustive check of the UI's "who can do what" table against the backend workflow, the report form's rules
@@ -233,11 +260,11 @@ progress stages, and each screen.
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System overview; backend design and security; frontend structure; integration decisions (contract, proxy, auth, money); limitations and next steps |
 | [AI_JOURNAL.md](AI_JOURNAL.md) | How AI was used: the prompts that shaped the design or found defects, what was accepted, challenged or overridden, and what was and was not verified |
-| [backend/CLAUDE.md](backend/CLAUDE.md), [frontend/CLAUDE.md](frontend/CLAUDE.md), [CLAUDE.md](CLAUDE.md) | Working rules for AI assistants, per area |
+| [backend/CLAUDE.md](backend/CLAUDE.md), [frontend/CLAUDE.md](frontend/CLAUDE.md), [notification-service/CLAUDE.md](notification-service/CLAUDE.md), [CLAUDE.md](CLAUDE.md) | Working rules for AI assistants, per area |
 | [DOCKER.md](DOCKER.md) | Install Docker, run the whole system with Kafka in containers, verify events, troubleshoot |
 | [docs/E2E-VALIDATION-FLOW.txt](docs/E2E-VALIDATION-FLOW.txt) | Manual end-to-end test script |
 | [docs/SWAGGER-TEST-GUIDE.txt](docs/SWAGGER-TEST-GUIDE.txt) | Testing the API through Swagger |
 
 ## Known limitations and deployment considerations
 
-The current implementation is a development/assessment baseline, not a production deployment configuration. Review [ARCHITECTURE.md](ARCHITECTURE.md), Part E, before deploying. Key considerations are: in-memory H2 data (including uploaded documents, which are not virus-scanned) is lost on restart; the H2 console is opt-in (off by default) and unauthenticated when enabled; the backend has no CORS configuration and relies on a proxy or same-origin gateway; claim amounts have no currency; optimistic locking is not implemented; and Docker/Kafka execution has not been confirmed in the recorded verification evidence.
+The current implementation is a development/assessment baseline, not a production deployment configuration. Review [ARCHITECTURE.md](ARCHITECTURE.md), Part E, before deploying. Key considerations are: in-memory H2 data (including uploaded documents, which are not virus-scanned) is lost on restart; the H2 console is opt-in (off by default) and unauthenticated when enabled; the backend has no CORS configuration and relies on a proxy or same-origin gateway; claim amounts have no currency; optimistic locking is not implemented; claimants' email addresses travel on the Kafka topic, and the notification service's duplicate protection is in memory; and Docker execution has not been confirmed in the recorded verification evidence.

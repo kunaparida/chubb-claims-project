@@ -34,8 +34,9 @@ check has verified it. Each entry says what was **actually verified** and what w
 | 9 | Reviewing the project against a scoring rubric found dead code, an unauthenticated database console and undocumented endpoints; all three were fixed and **verified on the running app**. | F7 |
 | 10 | After a UI redesign, looking at the **running app** found what 250 unit tests could not: a blank logo on phone screens (two logos shared one gradient id), a header four rows tall, wrapping claim numbers. All fixed and re-checked. | F8 |
 | 11 | A request for an *optional upload* had nothing to land on (the API could not store a file), so it was built end to end. The file type is judged from the file's **first bytes**, not its name. Live use then found a wrong download filename header, an unstyled button and a cramped phone layout (fixed twice), and the AI caught its own wrong error message in a guide by reading the handler before leaving it. | F9 |
+| 12 | For the notification service the AI found that the event it was asked to "send" **did not contain the claimant's email**, and that the Kafka producer already existed, so only the consumer was new. Its tests were all green, yet the first run of the real applications together showed the consumer group id was silently ignored (`@KafkaListener`'s `id` doubles as the group). Fixed with a test that was seen to fail first. | F10 |
 
-**Evidence rather than assertion:** 117 backend tests (97.1% line coverage, measured by JaCoCo), 312 frontend tests, a 28-check and a
+**Evidence rather than assertion:** 118 backend tests (97.1% line coverage, measured by JaCoCo), 76 notification-service tests (a real Kafka broker and SMTP server run inside them), 312 frontend tests, a live run of the real applications together, a 28-check and a
 45-check scripted run against the real backend, a browser walkthrough, and a mutation check that deliberately broke a rule to prove the
 tests notice. What was *not* run (Docker, Kafka against a broker, the real file-chooser dialog, some screens in a browser) is listed in each entry.
 
@@ -43,7 +44,7 @@ tests notice. What was *not* run (Docker, Kafka against a broker, the real file-
 
 | | |
 |---|---|
-| **The author decided** | Backend first and frontend second (the brief's priority); H2 as the database; one repository with one set of documents; Docker with Kafka; to drop the PostgreSQL attempt and keep H2; to keep this journal to the prompts that matter; and edited the compose file and `SecurityConfig` by hand. |
+| **The author decided** | Backend first and frontend second (the brief's priority); H2 as the database; one repository with one set of documents; Docker with Kafka; to drop the PostgreSQL attempt and keep H2; to keep this journal to the prompts that matter; to add a Kafka-consuming notification service that emails the claimant (and allowed the download of the mail libraries it needed); and edited the compose file and `SecurityConfig` by hand. |
 | **The AI (Claude Code) did** | Read the sources, proposed designs, wrote code, tests and documents, ran builds, tests and live checks, and reported what it could not verify. |
 | **Guardrails written down** | Each area's `CLAUDE.md`: commit only when asked, ask before installing or downloading, never edit the backend from UI work, never invent the author's decisions, keep documents true to the code. |
 
@@ -55,7 +56,7 @@ tests notice. What was *not* run (Docker, Kafka against a broker, the real file-
 | **CHALLENGED** | AI output questioned or verified, then kept or changed. |
 | **OVERRODE** | The author decided differently from the AI. |
 
-**Prompt inventory:** the log includes the retained substantive backend prompts (1–4), reconstructed prompt summaries for major backend design decisions (D1–D4), and the frontend/integration/packaging/review prompts (F1–F9). Routine prompts (run this, fix that typo, re-format, "continue") are omitted unless they materially changed the implementation. Where wording was not retained, it is labelled as reconstructed rather than verbatim.
+**Prompt inventory:** the log includes the retained substantive backend prompts (1–4), reconstructed prompt summaries for major backend design decisions (D1–D4), and the frontend/integration/packaging/review prompts (F1–F10). Routine prompts (run this, fix that typo, re-format, "continue") are omitted unless they materially changed the implementation. Where wording was not retained, it is labelled as reconstructed rather than verbatim.
 
 **Decision lines.** For entries the author has not yet written up, the AI adds a *Proposed* verdict with its reasons, taken from the record (what was checked, what was corrected). It is a suggestion only: the author confirms it or replaces it with their own words.
 
@@ -70,6 +71,7 @@ tests notice. What was *not* run (Docker, Kafka against a broker, the real file-
 | 5. Review | F6-F7 | `backend/`, root | A PostgreSQL attempt the author reversed; then a review of the whole project against a scoring rubric, with fixes. |
 | 6. UI redesign | F8 | `frontend/` | A professional look (logo, design system, light and dark), and a new report form: market list, 7-day date window, generated policy number. |
 | 7. Documents | F9 | `backend/`, `frontend/`, root documents | Optional document upload (three new endpoints, a section on the report form, a Documents box on the claim page) and a message for every missing or invalid field. Takes the API from 19 to 22 endpoints. |
+| 8. Notifications | F10 | `notification-service/`, `backend/` (event), compose, documents | A separate service that consumes the status-change events from Kafka and emails the claimant: retries, a dead-letter topic, duplicate protection, a local inbox (Mailpit) in Docker. The event gains the claimant's email and name. |
 
 ## 3. Key outcomes
 
@@ -77,9 +79,11 @@ tests notice. What was *not* run (Docker, Kafka against a broker, the real file-
   in-memory H2 database.
 - Workflow rules enforced in the service layer; invalid transitions raise `BusinessException`.
 - Audit history and a transactional outbox for status-change events (log publisher by default, Kafka optional).
-- `mvn test`: 117 tests, 0 failures (42 before the submission-repository work), with a JaCoCo coverage report: 97.1% of lines, 86.9% of branches.
+- `mvn test`: 118 tests, 0 failures (42 before the submission-repository work), with a JaCoCo coverage report: 97.1% of lines, 86.9% of branches.
 - Every endpoint documented in OpenAPI (enforced by a test); `POST /api/claims` answers `201` with a `Location` header; the H2 console is off by default.
 - Optional claim documents (PDF, JPG or PNG; 5 files of 5 MB; type judged from the file's contents), visible to whoever can see the claim.
+- A separate notification service (`notification-service/`): it consumes the status-change events from Kafka and emails the claimant, with retries, a dead-letter
+  topic and duplicate protection. Its tests run a real Kafka broker and SMTP server in the JVM, and the real applications were run together once outside Docker.
 - An Angular 22 UI (zoneless, signals) integrating all 22 endpoints for the three roles in one app: 312 Vitest tests and a clean strict
   production build (about 316 kB initial).
 - Both applications, their histories and one set of documents in a single repository, with a Docker Compose stack (backend, frontend,
@@ -231,8 +235,8 @@ Review the claims workflow and propose a reliable way to record claim status his
   | How is ordering kept? | The relay stops at the first failure to preserve per-claim order; the Kafka record key is the claim id. |
 
 - **Decision: CHALLENGED, then ACCEPTED.**
-- **Known limit:** the Kafka publisher is unit-tested with a mocked template. The Docker stack (F5) gives it a real broker to run against;
-  no result of that run is recorded yet.
+- **Known limit:** the Kafka publisher is unit-tested with a mocked template. It was later run against a real broker started inside a JVM
+  (F10, 2026-10-26); the Docker stack (F5) is still the only way to run it against the compose broker, and no result of that run is recorded yet.
 
 ## D2. Claim type and market
 
@@ -465,7 +469,7 @@ wrong statements were removed before they were kept.
 4. Only claim creation and the status transitions write outbox rows; `pickup` and `assign` do not (checked in `ClaimService`).
 5. **A weakness, not fixed:** with the broker down, `send()` can wait for Kafka's default `max.block.ms` (60 s) before the code's own 10 s
    acknowledgement timeout applies, holding the relay thread and its transaction. A suggested setting is in `DOCKER.md`.
-6. Nothing consumes the events yet.
+6. Nothing consumes the events yet. (F10 later added the notification service, which does.)
 
 **Corrections:** the AI tried to run a local production build only to learn the Angular output folder, and the author interrupted that
 command; the folder (`dist/claim-management-ui/browser`) was confirmed from the installed builder's schema instead. A Debian-based Node
@@ -685,6 +689,72 @@ managers can read but not add documents; that there is no delete or replace; and
 
 ---
 
+## F10: A notification service that consumes the Kafka events and emails the claimant
+
+**Prompt** (verbatim, spelling as sent)
+```text
+so now i need the kafka implemitation like when any status changes appear so it will send an event and you need to add one notification service where kafka consumer consume the topic data and send email to the customer or claimates
+```
+
+**What the AI found before building anything.** The producing half already existed (the outbox, the relay and `KafkaEventPublisher`, from D1), so "send an event when a
+status changes" needed no new code. What was missing was the consumer, and, less obviously, **the event did not say who to email**: it had no claimant address. The AI
+reported both, proposed a separate service (B.1 had already named notifications as the first thing to split out), and asked before downloading anything, because the mail
+libraries were not in the local Maven cache. The author allowed the download.
+
+**Result**
+
+* **Backend:** `ClaimStatusChanged` gains `claimantEmail` and `claimantName` (from the claim, not from the officer who made the change). Fields are only added, so older consumers
+  keep working; a new test fails if any contract field disappears. Backend tests 117 to 118.
+* **`notification-service/`** (new, Spring Boot 3.4.5, no database): `@KafkaListener` on `claims.claim-status-changed`, an `EventParser` that rejects what cannot be emailed,
+  `NotificationService` (one event in, at most one email out; a repeat of an event id is skipped), `EmailComposer` (plain-text and HTML parts, wording per status, a link to
+  the claim page, the amount shown with its market because claims have no currency, the officer's notes deliberately left out), `SmtpEmailSender` (and a log-only mode for
+  running without a mail server), and an error handler: a failed email is retried after 1, 2 and 4 seconds and then copied to a dead-letter topic, while a record that can never
+  work (broken JSON, no usable address) is dead-lettered at once. Offsets are committed only after the email was handed to the mail server. It runs on port 8081 with only a health endpoint.
+* **Containers:** `notification-service/Dockerfile`; `docker-compose.yml` gains `notification-service` and `mailpit` (a local inbox at http://localhost:8025), and `kafka-init`
+  now also creates the dead-letter topic.
+* **Documents:** README (an "Email notifications" section), ARCHITECTURE (A, A.1, B.1, B.3, new B.10, E), DOCKER.md (ports, parts 4 to 5, troubleshooting), a new
+  `notification-service/CLAUDE.md`, the root and backend `CLAUDE.md` (the event is a contract and holds personal data), the E2E guide (new optional Part 13) and the Swagger guide.
+
+**Corrections and findings**
+
+1. **The tests were green and the service was still wrong.** The first live run of the real applications showed the consumer group was `claim-status-notifications`, not the configured
+   `claims-notification-service`: in Spring Kafka a listener's `id` is also its group id unless `idIsGroup = false`, so the `NOTIFICATIONS_GROUP_ID` setting was silently ignored. The group
+   decides where the service resumes after a restart, so this is a real defect. Fixed, then a test that asserts the configured group was written and **seen to fail with the fix reverted**
+   (`expected: <notification-it> but was: <claim-status-notifications>`) before the fix was restored.
+2. **A log line would have leaked part of the payload.** Reading the test output showed the retry logger printing Jackson's root-cause message, which can quote the start of the input, and
+   the input holds an email address. The logger now stops at the service's own `BadEventException`, with a test whose premise (that Jackson does quote the payload) is itself asserted.
+3. **The AI's own test slips.** A first draft of `NotificationServiceTest` contained a placeholder test that asserted nothing (and would have failed Mockito's strict-stubbing check), and
+   another test had a pointless variable. Both were removed rather than left to pad the count. The coverage report then showed the documented `log` mode had no test at all; two were added,
+   one of them pinning that the address is masked in that mode too.
+4. **A wrong assumption about the test broker.** The AI asked the in-JVM Kafka broker to listen on port 9094; it ignored that and used a random port (61179). The live run used the port it got.
+5. **The AI went beyond what was approved.** It was allowed to download the mail starter and GreenMail. Running `mvn dependency:resolve` also pulled in the Maven dependency plugin and its
+   build tooling (Doxia, Velocity and similar), which it had not described. They are build tools, not part of the application, but they were more than the author agreed to and should have been mentioned first.
+6. **Slow test runs, one cause found and one not proven.** One full run took about ten minutes instead of about a minute (a Kafka `CommitFailedException` and an SMTP read timeout in its log), and
+   a later one had a single test taking 61 seconds. Per-test timings showed the time went into the test helper, which joined a new Kafka consumer group in every test to read the dead-letter topic.
+   It now assigns the partitions directly, with no group: that test dropped to 5 seconds and the whole Kafka suite ran in 67 seconds. That removes the most likely cause, but the ten-minute run was
+   seen once and was not reproduced, so it is not proven to be the same thing (a stalled machine remains possible).
+
+**Verification**
+
+* **Backend:** 118 tests, 0 failures, in a scratch copy (JaCoCo 97.1% of lines, 86.9% of branches, unchanged). **Notification service:** 76 tests, 0 failures; 99.0% of lines (200/202, only `main()` is not run), 88.6% of branches. They
+  include parser tests with hostile input, every status's wording, HTML escaping, header-injection attempts, the SMTP sender against a real SMTP server (GreenMail) with non-ASCII names and a dead
+  server, and two Spring Boot tests against **a real Kafka broker started in the JVM**: an event on the topic becomes an email; a claim's emails keep their order; a repeated event is emailed once;
+  a poison record and a record with no address are dead-lettered without blocking the next one; a temporary mail failure is retried until it works; a mail server that stays down sends the record
+  to the dead-letter topic after the retries.
+* **The real applications together, once, outside Docker (2026-10-26):** the new backend jar publishing to a real Kafka broker, the notification service jar consuming, and an SMTP server receiving. A
+  claim registered, reported, picked up, reviewed, questioned, answered, approved and settled through the API produced **six emails, in order, to the claimant** (not the officer), with the right
+  subjects, a text and an HTML part, the claim link and the amount with its market. The service's log showed only `m***@example.com`. After a restart of the service the mailbox still held six emails:
+  nothing was sent again.
+* **Not verified:** the Docker image and the new compose services (the compose file was only parsed with SnakeYAML, never run by Docker, and the `axllent/mailpit:latest` image was never pulled); Mailpit; a
+  real SMTP provider (TLS, authentication, rate limits); a mail-server outage and the dead-letter topic in the live run (they are covered by the tests only); more than one consumer thread; events published by a
+  backend older than this change (they have no address and would be dead-lettered); the new E2E Part 13 (written from the same rules, its C2 and C3 counts not observed). The frontend was not changed.
+
+**Decision:** `Pending author review`. *Proposed by the AI:* **ACCEPTED**, with these for the author to confirm: a separate service rather than a consumer inside the backend; the claimant's email and name travelling
+on the topic (personal data on the topic and on the dead-letter topic, see ARCHITECTURE part E); duplicate protection kept in memory only; English-only, email-only wording; and whether the extra build tooling
+downloaded in correction 5 is acceptable.
+
+---
+
 # Part D: Open Questions for the Backend
 
 The frontend does not change the backend. These are things the author may want to change there, or accept as limitations and explain.
@@ -706,7 +776,7 @@ Backend:
 | Area | Current state |
 |---|---|
 | Concurrency | No optimistic locking (`@Version`). |
-| Messaging | The Kafka publisher is unit-tested with a mocked template; no result of running it against a real broker is recorded. |
+| Messaging | The Kafka publisher is unit-tested with a mocked template, and publisher and consumer ran against a real broker started inside a JVM (F10); no result of running them against the Docker stack's broker is recorded. The notification service's duplicate protection is in memory, claimants' email addresses travel on the topic and the dead-letter topic, and nothing watches or replays the dead-letter topic. |
 | Database | In-memory H2 with `ddl-auto=update` and no migration tooling: **all data is lost on restart**. A PostgreSQL example is only a comment in `application.properties` (no driver is a dependency). The H2 console is opt-in (`H2_CONSOLE_ENABLED`, off by default); when on it needs no sign-in (local development only). |
 | Secrets | Default JWT secret and seeded-account password are for local use only. |
 | Documents | Uploaded files are stored as BLOBs in the in-memory database (lost on restart, read fully into memory), are not virus-scanned, are typed by their first bytes only, and cannot be removed or replaced. Limits: 5 files of 5 MB per claim. |
@@ -726,7 +796,7 @@ These are the author's to write; the AI has not filled them in because it would 
 1. **Pre-existing commits.** The backend repository already had commits before the submission work (`Initial commit` to `pagination
    added`). State which parts were AI-generated, which were written by hand, and how they relate to the Phase 1 build.
 2. **F1 prompt text.** If an exact transcript is available, replace the clearly labelled reconstruction with it; otherwise keep the authenticity note.
-3. **Decisions for F1 to F9** are all `Pending author review`, each with a verdict *proposed by the AI*. Confirm or change every one in your
+3. **Decisions for F1 to F10** are all `Pending author review`, each with a verdict *proposed by the AI*. Confirm or change every one in your
    own words (one or two sentences: what you accepted, what you challenged or overrode, and why). **This is the part of the journal only you
    can write, and the part the brief asks for.**
 4. **F3 was reconstructed.** Read it and correct anything that does not match what you remember of that session.
@@ -748,13 +818,17 @@ These are the author's to write; the AI has not filled them in because it would 
     Try the upload with real files through the browser's own file chooser and by drag-and-drop (the AI could only hand files to the form by script), and
     follow E2E steps 3.2A, 6.5A and 7.9 once. Decide whether the Postman collection should get the three new requests, and what you would say about
     storing files in the database (the answer in `ARCHITECTURE.md` B.9 and part E: fine for an in-memory demo, object storage for real use).
+12. **Notifications (F10).** Run the Docker stack (`DOCKER.md` part 5.3A and 5.3B), look at the emails in Mailpit at http://localhost:8025, and write down what happened:
+    the compose file and the two new containers have never been run. Try one real SMTP account through the `MAIL_*` variables. Confirm the decisions F10 lists (separate
+    service; the claimant's address on the topic; in-memory duplicate protection), and decide whether the extra Maven build tooling that was downloaded is acceptable.
+    Then follow E2E Part 13 once.
 
 ---
 
 # Appendix: Template for New Entries
 
 ```markdown
-## F10: <short title>
+## F11: <short title>
 
 **Prompt** (verbatim, or "reconstructed prompt summary (not verbatim)"): <what was typed>
 

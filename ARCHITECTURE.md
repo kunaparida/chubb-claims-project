@@ -3,13 +3,13 @@
 This document describes the implemented application structure, the main engineering choices, integration boundaries, and known gaps. It distinguishes current behaviour from recommended future work.
 
 A claims platform: claimants report and track incidents, officers work claims to a decision and settlement, managers see
-workload, liability and performance. It is delivered as **one repository with two applications** that meet at a single
-contract, the HTTP API.
+workload, liability and performance. It is delivered as **one repository with three applications**: the backend and the frontend meet at
+a single contract, the HTTP API, and a small notification service reads the backend's Kafka events and emails the claimant.
 
 | Part | Covers |
 |---|---|
 | [A. System overview](#part-a-system-overview) | The two applications, how a request travels, who owns what |
-| [B. Backend](#part-b-backend) | Layers, domain model, workflow, sync vs event-driven, security, errors, tests |
+| [B. Backend](#part-b-backend) | Layers, domain model, workflow, sync vs event-driven, security, errors, tests, documents, and the [notification service](#b10-the-notification-service) |
 | [C. Frontend](#part-c-frontend) | Structure, routing, state, API layer, session, errors, the action table, tests |
 | [D. Integration decisions](#part-d-integration-decisions) | Contract ownership, dev proxy, who-can-do-what, officers, money, history |
 | [E. Known limitations and next steps](#part-e-known-limitations-and-next-steps) | Backend, frontend and whole-system gaps, each with a next step |
@@ -30,23 +30,26 @@ contract, the HTTP API.
    ▼
  Spring Boot service :8080 ──► H2 in-memory database (PostgreSQL appears only as a commented example)
    │                           outbox_events ─► scheduled relay ─► log (default) or Kafka
-   └─ Swagger UI / OpenAPI at /swagger-ui/index.html, /v3/api-docs
+   │                                                                      │  topic claims.claim-status-changed
+   └─ Swagger UI / OpenAPI at /swagger-ui/index.html, /v3/api-docs        ▼
+                                                              Notification service :8081 ─► SMTP server ─► the claimant's inbox
+                                                              (dead-letter topic .dlt for what it cannot send)   (Mailpit in Docker)
 ```
 
-| | Backend | Frontend |
-|---|---|---|
-| Folder | `backend/` | `frontend/` |
-| Stack | Java 21, Spring Boot 3.4.5, Spring Security + JWT, Spring Data JPA, H2, optional Kafka | Angular 22 (zoneless, signals, standalone components), RxJS, Vitest |
-| Owns | The API contract, every business rule, access control, audit history, events | Presentation, navigation, and a convenience copy of the "who can do what" rules |
-| Authority | **Final.** Every rule is enforced here | **None.** Guards and hidden buttons only steer; the server answers 403/404/409 regardless |
+| | Backend | Frontend | Notification service |
+|---|---|---|---|
+| Folder | `backend/` | `frontend/` | `notification-service/` |
+| Stack | Java 21, Spring Boot 3.4.5, Spring Security + JWT, Spring Data JPA, H2, optional Kafka | Angular 22 (zoneless, signals, standalone components), RxJS, Vitest | Java 21, Spring Boot 3.4.5, Spring Kafka (consumer), Spring Mail; no database |
+| Owns | The API contract, every business rule, access control, audit history, events | Presentation, navigation, and a convenience copy of the "who can do what" rules | Turning a status-change event into an email, and not sending the same one twice |
+| Authority | **Final.** Every rule is enforced here | **None.** Guards and hidden buttons only steer; the server answers 403/404/409 regardless | **None over claims.** It only reads events and never calls the claims API |
 
 **The backend owns the contract.** The frontend was built against the finished backend's Swagger and README and never changes
 them. Where the backend lacks something the UI would like (CORS, an officers endpoint, "allowed actions", a currency), the UI works
 around it and the gap is written down in [part D](#part-d-integration-decisions) and [part E](#part-e-known-limitations-and-next-steps).
 
-**Container design (execution not yet verified).** `docker-compose.yml` is configured for three long-lived containers and one setup job: Kafka (single node, KRaft), the backend
-(`EVENTS_PUBLISHER=kafka`, same in-memory H2 database, H2 console off unless `H2_CONSOLE_ENABLED=true`, `restart: unless-stopped`), the frontend (nginx), and
-`kafka-init`, which creates the topic. In this layout nginx plays the role of the dev proxy: the browser only talks to port 4200 and nginx
+**Container design (execution not yet verified).** `docker-compose.yml` is configured for five long-lived containers and one setup job: Kafka (single node, KRaft), the backend
+(`EVENTS_PUBLISHER=kafka`, same in-memory H2 database, H2 console off unless `H2_CONSOLE_ENABLED=true`, `restart: unless-stopped`), the notification service,
+Mailpit (a local inbox that catches its emails), the frontend (nginx), and `kafka-init`, which creates the topic and its dead-letter topic. In this layout nginx plays the role of the dev proxy: the browser only talks to port 4200 and nginx
 forwards `/api/` to the backend, so the backend's missing CORS configuration still does not matter (see D.2). Details and the Kafka
 configuration check are in [DOCKER.md](DOCKER.md). The available development record does not include a successful image build or container run (see `AI_JOURNAL.md`).
 
@@ -69,6 +72,8 @@ named in the last column give the detail. "Revisit when" says what would change 
 | Frontend state | Signals in components, one API service, a central action table (C.5) | NgRx or another store | State is per screen and short-lived; there is nothing shared enough to justify a store | Screens start sharing and mutating the same data |
 | Browser to backend | Same-origin: dev proxy, or nginx in Docker (D.2) | Adding CORS to the backend | The backend owns the contract and is not edited from the UI; same-origin also works unchanged behind a gateway | The SPA is served from another origin |
 | Database | In-memory H2, schema from Hibernate | PostgreSQL with migrations | No database server was available to the author (`AI_JOURNAL.md`, Prompt 3); keeps the project runnable with one command | Data must survive a restart (PostgreSQL, Flyway; part E) |
+| Telling the claimant | A separate notification service: it consumes the Kafka event and sends the email (B.10) | A listener inside the backend; the backend sending mail in the request that changes the status | An email server being slow or down must never slow or fail a claim update, and notifications need their own release and scaling; the outbox event is the seam B.1 already named | Several channels (SMS, push) or per-claimant preferences appear: give the service its own store |
+| Who the email goes to | The event carries `claimantEmail` and `claimantName` (B.3) | The service calls the claims API to look the claimant up | The API has no service-to-service login or contact endpoint, and a lookup would put the service back on the backend's availability. The cost is personal data on the topic (part E) | The topic must hold no personal data: send only an id and look the contact up |
 | Claim documents (optional attachments) | Stored as a BLOB row next to the claim; the type is decided from the file's first bytes (B.9) | Files on disk; object storage (S3) with only a key in the database; trusting the browser's file type | There is no storage service here, a row keeps the file inside the claim's access rules and transaction, and a name or browser type can be faked | Files are larger or more numerous than a few MB per claim, or need scanning or retention rules (object storage plus a virus scan; part E) |
 
 **What was built and what was left out.** The time went first to the backend (all 22 endpoints, workflow rules, audit history, outbox,
@@ -117,9 +122,9 @@ Packages (`com.claims`): `controller`, `service`, `repository`, `entity`, `dto`,
 | Scaling | No evidence yet that any part needs independent scaling. |
 | Operations | One artefact to build, run and debug. |
 
-**Where I would split first, and why:** *notifications* and *reporting/dashboards*. They only need to know that a claim
-changed, they tolerate seconds of delay, and dashboards have a different read profile (large aggregates) from claim
-writes. The seam already exists: the `ClaimStatusChanged` event.
+**Where I split first, and why:** *notifications*, which is now a separate service ([B.10](#b10-the-notification-service)). It only needs to
+know that a claim changed and tolerates seconds of delay. *Reporting/dashboards* would be next: they have a different read profile (large
+aggregates) from claim writes. The seam is the `ClaimStatusChanged` event.
 
 ### B.2 Domain model
 
@@ -181,9 +186,13 @@ Event contract (`claims.claim-status-changed`, JSON):
 ```json
 {"eventId":"uuid","claimId":1,"claimNumber":"CLM-...","claimType":"PROPERTY","market":"HK",
  "amountClaimed":1250.00,"fromStatus":"UNDER_REVIEW","toStatus":"APPROVED",
- "changedBy":"officer@claims.local","occurredAt":"2026-10-14T06:45:17Z"}
+ "changedBy":"officer@claims.local","occurredAt":"2026-10-14T06:45:17Z",
+ "claimantEmail":"jane@example.com","claimantName":"Jane Doe"}
 ```
-`fromStatus` is null for the initial submission.
+`fromStatus` is null for the initial submission. `claimantEmail` and `claimantName` come from the claim (not from whoever made the change, who is
+in `changedBy`) and are there so the notification service can write to the claimant without calling back. They are personal data, which is
+the price of that choice (part E). Fields are only ever added, never renamed, and consumers ignore fields they do not know; the backend's
+`ClaimAuditRecorderTest` fails if one of the contract fields disappears. The officer's notes are deliberately **not** in the event.
 
 ### B.4 Read/write profile and what officers need
 - **Writes** are low volume, transactional, per claim. **Reads** are dominated by lists and dashboards.
@@ -257,7 +266,7 @@ file that is not a PDF, JPG or PNG, `500` generic (details only in logs).
 - Postman collection (`backend/postman/`) replays the same flow, with assertions, in collection order. It was **not** extended for the
   documents endpoints (Swagger and the integration tests cover them).
 - **Coverage is measured, not assumed:** `mvn test` runs JaCoCo and writes `backend/target/site/jacoco/index.html`. On 2026-10-26
-  (JDK 21, JaCoCo 0.8.15, 117 tests): **97.1% of lines (639/658), 96.9% of instructions, 86.9% of branches (133/153)**. It is a report, not a
+  (JDK 21, JaCoCo 0.8.15, 118 tests): **97.1% of lines (639/658), 96.9% of instructions, 86.9% of branches (133/153)**. It is a report, not a
   build gate; the lowest are the application's main class, `config` (91.5%) and `security` (93.9%). Coverage shows what ran, not that it was asserted well, so
   the role matrix and the workflow are also exercised by the Postman run and the manual script in `docs/`.
 
@@ -282,6 +291,57 @@ saves the file instead of running it and does not keep a copy. The web server al
 
 Files are stored as a `@Lob` column in `claim_documents`, which suits the in-memory H2 database and keeps a file inside the claim's own
 access rules; a real deployment would put the bytes in object storage and keep only a key (part E).
+
+### B.10 The notification service
+
+A separate Spring Boot application, `notification-service/` (port 8081, no database, no business API). It exists so that telling the
+claimant never touches the request that changes the claim: a slow or dead mail server cannot slow or fail a status change, because the
+backend only writes the event (B.3) and moves on.
+
+```
+ backend ──outbox──► Kafka  claims.claim-status-changed ──► ClaimStatusConsumer ──► EventParser ──► NotificationService
+                          │ (key = claim id, 3 partitions)                                              │ skip if eventId seen
+                          │                                                                             ▼
+                          └──► claims.claim-status-changed.dlt  ◄── error handler ◄── EmailComposer ─► EmailSender ─► SMTP
+                               (after the retries, or at once for a record that can never work)              (or log mode)
+```
+
+**One email per event, to the claimant.** `EmailComposer` writes the message from the event: a plain-text part and an HTML part (every email
+carries both), a short sentence on what happens next, the facts (claim number, type, amount **with its market**, status, time in UTC) and a
+link to `<PORTAL_URL>/claims/<id>`. Each status has its own wording; a status the service does not know still gets a generic email instead of
+an error. Left out on purpose: the officer's notes (not in the event; claimants read them after signing in) and any currency (claims have none).
+The sender is `Claims Platform <no-reply@claims.local>` by default, and each message carries `Auto-Submitted: auto-generated` (RFC 3834) so mail
+systems do not answer it with out-of-office replies.
+
+**Delivery guarantees.**
+
+| Situation | What happens |
+|---|---|
+| Normal | The offset is committed only **after** the email was handed to the SMTP server (`ack-mode=record`). A crash before that re-delivers the record |
+| The same event arrives twice (the outbox is at-least-once) | `ProcessedEvents` remembers the last 10 000 `eventId`s and skips a repeat. An event is remembered only after a successful send, so a failed send is retried |
+| The mail server is down or slow | The same record is retried after 1 s, 2 s, 4 s (3 retries, capped at 30 s; connect and read timeouts are 5 s and 10 s). Records behind it on that partition wait, which keeps one claim's emails in order |
+| Still failing after the retries | The record is copied to `claims.claim-status-changed.dlt` with the reason in its headers, and the consumer moves on |
+| A record that can never work (invalid JSON, no `eventId`, no usable address) | `BadEventException`: not retried, dead-lettered at once |
+| The service restarts | It resumes from its committed offset (`NOTIFICATIONS_GROUP_ID`); nothing already emailed is sent again |
+
+**Privacy.** The address is personal data. It is masked in every log line (`j***@example.com`), the parser's error messages never quote the
+payload, and `log` mode (which prints the whole email) is for local use only. The dead-letter topic holds the original payload, so it needs the
+same care as the main topic.
+
+**Configuration** (environment variables; defaults suit a local run against Mailpit): `SPRING_KAFKA_BOOTSTRAP_SERVERS`, `EVENTS_TOPIC`,
+`DEAD_LETTER_TOPIC`, `NOTIFICATIONS_GROUP_ID`, `PORTAL_URL`, `NOTIFICATIONS_MAIL_MODE` (`smtp` or `log`), `MAIL_HOST`, `MAIL_PORT`, `MAIL_FROM`,
+`MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_AUTH`, `MAIL_STARTTLS`, `NOTIFICATIONS_MAX_RETRIES`, `NOTIFICATIONS_RETRY_DELAY_MS`. A wrong mode, or `smtp`
+without a host, stops the service at start-up with a message that says what to set. Credentials are only ever read from the environment.
+
+**Testing.** 76 tests (JaCoCo, 2026-10-26: 99.0% of lines, 200/202, only `main()` is not run; 88.6% of branches, 78/88). Unit tests cover the parser (including hostile input), the wording of every status, HTML escaping, header-injection
+attempts, de-duplication and the mode switch. The SMTP sender is tested against a real SMTP server running in the test (GreenMail), including
+non-ASCII names and a server that is down. The Kafka path is tested against **a real Kafka broker started inside the test JVM** (three partitions,
+like the compose file): a status change on the topic arrives as an email; a claim's emails keep their order; a repeated event is emailed once; a
+poison record and a record with no address are dead-lettered and do not block the next one; a temporary mail failure is retried until it works; a
+mail server that stays down sends the record to the dead-letter topic; and the configured consumer group is the one in use (a bug the live run
+found, see `AI_JOURNAL.md` F10). On 2026-10-26 the real applications were also run together: the backend jar publishing to a real broker, this
+service consuming, and an SMTP server receiving. A claim taken through every status produced six emails, in order, to the claimant, and a restart
+of the service sent none again. That run used a Kafka broker and an SMTP server started in a JVM, not the Docker stack, which has still not been run.
 
 ---
 
@@ -477,13 +537,18 @@ be found." (404). After a failed action the claim is reloaded so the screen show
 
 ## Part E: Known limitations and next steps
 
-The items below are current gaps or verification requirements, not claims that the proposed follow-up work has already been completed. The container stack and real-broker Kafka path should be treated as unverified until a successful run is recorded.
+The items below are current gaps or verification requirements, not claims that the proposed follow-up work has already been completed. The container stack should be treated as unverified until a successful run is recorded. The Kafka path has run against a real broker started inside a JVM (tests, and a live run of the real applications on 2026-10-26), but not against the Docker stack's broker.
 
 ### Backend (deliberate, for the sprint)
 | Limitation | Next step |
 |---|---|
 | No optimistic locking: two officers acting at the same instant could race | Add `@Version` to `Claim`, map the conflict to 409 |
-| Kafka path wired and unit-tested but **not run against a real broker** (a Docker Compose with Kafka exists, `DOCKER.md`, but no run result is recorded) | Run it; add an integration test (Testcontainers) |
+| The Kafka publisher is unit-tested with a mock in the backend. It **has** published to a real broker (an in-JVM KRaft broker) in a live run on 2026-10-26, but there is no automated backend test against a broker, and the Docker Compose stack (`DOCKER.md`) has never been run, so its broker, the added `mailpit` and `notification-service` containers and their wiring are untested | Run the stack and record the result; add a Testcontainers or embedded-broker test to the backend |
+| **Notification service: duplicate protection is in memory.** `ProcessedEvents` remembers the last 10 000 event ids until the process restarts. If the service dies after sending an email but before committing the offset, the restart sends that one email again | Keep processed ids in a small table keyed by `eventId`, or send through a provider that de-duplicates by message id |
+| **Notification service: personal data on the topic.** Every event, and every record on the dead-letter topic, holds the claimant's email address and name, with whatever retention the broker has | Restrict topic access, set a short retention, or publish only an id and have the service look the contact up (which needs a service login on the API) |
+| Notification service: nobody watches the dead-letter topic, and there is no replay tool. "Sent" means the SMTP server accepted the message; bounces and spam filtering are not seen | Alert on the dead-letter topic's depth; a small command that replays its records; read bounces from the mail provider |
+| Notification service: one language, one template per status, no claimant preferences or opt-out, email only. While a record is being retried, other claims on the same partition wait (about 7 s with the defaults) | Templates per market and language, a preference store, further channels; retry through a retry topic so a bad address does not hold up other claims |
+| Notification service: tested against a local SMTP server (GreenMail) and, live, against one started in a JVM. It has not been run against Mailpit in Docker or a real provider (TLS, authentication, rate limits are untested) | Run the compose stack; try one real SMTP account through the `MAIL_*` variables |
 | With the broker down, `KafkaTemplate.send` can block up to Kafka's default `max.block.ms` (60 s) before the 10 s acknowledgement timeout applies, holding the relay thread and its transaction | `spring.kafka.producer.properties.max.block.ms=10000` |
 | Outbox poller runs in every instance, so duplicates are possible with several instances | Row locking (`FOR UPDATE SKIP LOCKED`) or a dedicated relay |
 | `ddl-auto=update`, in-memory H2, bootstrap users: **all data is lost on restart** | Flyway migrations, PostgreSQL (add the driver; the datasource example is already commented in `application.properties`), real user provisioning |
