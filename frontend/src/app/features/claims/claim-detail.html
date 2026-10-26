@@ -1,23 +1,34 @@
-<p><a [routerLink]="backLink()">← Back</a></p>
+<a class="back-link" [routerLink]="backLink()"><app-icon name="back" />Back</a>
 
 @if (loadError()) {
   <p class="error" role="alert">{{ loadError() }}</p>
 }
 @if (!claim() && !loadError()) {
-  <p class="muted">Loading…</p>
+  <p class="loading"><span class="spinner"></span>Loading…</p>
 }
 
 @if (claim(); as c) {
-  <div class="page-head">
-    <div>
-      <h1>{{ c.claimNumber }}</h1>
-      <p class="muted">{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }} claim · market {{ c.market }} · policy {{ c.policyNumber }}</p>
+  <section class="card hero">
+    <div class="hero-top">
+      <div>
+        <h1>{{ c.claimNumber }}</h1>
+        <div class="chips">
+          <span class="chip"><app-icon [name]="c.claimType === 'MOTOR' ? 'car' : 'home'" />{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }} claim</span>
+          <span class="chip"><app-icon name="hash" />Policy {{ c.policyNumber }}</span>
+          <span class="chip">Market {{ marketName(c.market) }} ({{ c.market }})</span>
+        </div>
+      </div>
+      <app-status-badge [status]="c.status" />
     </div>
-    <app-status-badge [status]="c.status" />
-  </div>
+    <ol class="stepper" aria-label="Claim progress" data-testid="stepper">
+      @for (s of progress(); track s.label) {
+        <li [class]="'step ' + s.state" [attr.aria-current]="s.state === 'current' ? 'step' : null">{{ s.label }}</li>
+      }
+    </ol>
+  </section>
 
   @if (message()) {
-    <p class="success" role="status">{{ message() }}</p>
+    <p class="success" role="status"><app-icon name="check" /><span>{{ message() }}</span></p>
   }
   @if (actionError()) {
     <p class="error" role="alert">{{ actionError() }}</p>
@@ -30,7 +41,7 @@
         <dt>Amount claimed</dt>
         <dd data-testid="amount">{{ c.amountClaimed | amount }} <span class="muted">{{ c.market }}</span></dd>
         <dt>Incident date</dt>
-        <dd>{{ c.incidentDate }}</dd>
+        <dd>{{ c.incidentDate | date: 'mediumDate' }}</dd>
         <dt>Claimant</dt>
         <dd>{{ c.claimantName }} · {{ c.claimantEmail }}</dd>
         <dt>Officer</dt>
@@ -110,13 +121,70 @@
         <h2>Claimant's answer</h2>
         <p class="description" data-testid="info-response">{{ c.informationResponse }}</p>
       } @else {
-        <p class="pending">Waiting for the claimant to answer…</p>
+        <p class="pending"><app-icon name="clock" /> Waiting for the claimant to answer…</p>
       }
     </section>
   }
 
+  <section class="card documents" aria-labelledby="documents-heading">
+    <h2 id="documents-heading"><app-icon name="paperclip" />Documents <span class="chip">{{ documents().length }}</span></h2>
+
+    @if (documents().length === 0) {
+      <p class="muted" data-testid="no-documents">No documents have been attached to this claim.</p>
+    } @else {
+      <ul class="file-list" data-testid="documents">
+        @for (d of documents(); track d.id) {
+          <li>
+            <app-icon [name]="d.contentType === 'application/pdf' ? 'file' : 'image'" />
+            <span class="file-main">
+              <span class="file-name">{{ d.fileName }}</span>
+              <span class="muted">{{ formatSize(d.sizeBytes) }} · added by {{ d.uploadedByName }} · {{ d.uploadedAt | date: 'medium' }}</span>
+            </span>
+            <button type="button" class="link" (click)="download(d)" [disabled]="downloadingId() !== null">
+              <app-icon name="download" />{{ downloadingId() === d.id ? 'Downloading…' : 'Download' }}
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <div aria-live="polite">
+      @if (documentProblems().length > 0) {
+        <ul class="problem-list" data-testid="document-problems">
+          @for (p of documentProblems(); track p) { <li class="field-error">{{ p }}</li> }
+        </ul>
+      }
+    </div>
+
+    @if (mayAddDocuments()) {
+      <div class="add-documents">
+        @if (roomForDocuments()) {
+          <input id="moreDocuments" type="file" multiple class="sr-only" [accept]="accept" (change)="onFileInput($event)" />
+          <label for="moreDocuments" class="btn"><app-icon name="upload" />Add documents</label>
+          <span class="hint">PDF, JPG or PNG, up to {{ maxDocuments }} files of 5 MB each.</span>
+        } @else {
+          <p class="hint">This claim already has the maximum of {{ maxDocuments }} documents.</p>
+        }
+        @if (newFiles().length > 0) {
+          <ul class="file-list" data-testid="new-files" aria-label="Documents to upload">
+            @for (f of newFiles(); track f; let i = $index) {
+              <li>
+                <app-icon [name]="f.name.toLowerCase().endsWith('.pdf') ? 'file' : 'image'" />
+                <span class="file-main"><span class="file-name">{{ f.name }}</span><span class="muted">{{ formatSize(f.size) }}</span></span>
+                <button type="button" class="link" (click)="removeNewFile(i)" [attr.aria-label]="'Remove ' + f.name"><app-icon name="close" />Remove</button>
+              </li>
+            }
+          </ul>
+          <button type="button" class="primary" [disabled]="uploading()" (click)="uploadNewFiles()">
+            {{ uploading() ? 'Uploading…' : 'Upload ' + newFiles().length + (newFiles().length === 1 ? ' document' : ' documents') }}
+          </button>
+        }
+      </div>
+    }
+  </section>
+
   <section class="card">
-    <h2>History</h2>
+    <h2><app-icon name="clock" />History</h2>
     @if (history().length === 0) {
       <p class="muted">No history yet.</p>
     } @else {

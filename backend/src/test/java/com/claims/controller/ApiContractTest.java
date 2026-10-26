@@ -90,12 +90,12 @@ class ApiContractTest {
             }
         }
 
-        assertEquals(19, operations, "the API has 19 endpoints; update this test when one is added or removed");
+        assertEquals(22, operations, "the API has 22 endpoints; update this test when one is added or removed");
         assertTrue(undocumented.isEmpty(), "endpoints without a summary: " + undocumented);
 
         List<String> tags = new ArrayList<>();
         doc.get("tags").forEach(tag -> tags.add(tag.get("name").asText()));
-        assertTrue(tags.containsAll(List.of("Authentication", "Claims", "Manager dashboard")), "tags: " + tags);
+        assertTrue(tags.containsAll(List.of("Authentication", "Claims", "Documents", "Manager dashboard")), "tags: " + tags);
         assertFalse(doc.at("/components/securitySchemes/bearerAuth").isMissingNode(), "bearer scheme must be declared");
     }
 }

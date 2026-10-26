@@ -3,38 +3,58 @@
     <h1>Dashboard</h1>
     <p class="muted">Live from the backend.</p>
   </div>
-  <button type="button" (click)="load()" [disabled]="loading()">{{ loading() ? 'Refreshing…' : 'Refresh' }}</button>
+  <button type="button" (click)="load()" [disabled]="loading()"><app-icon name="refresh" />{{ loading() ? 'Refreshing…' : 'Refresh' }}</button>
 </div>
 
 @if (error()) {
   <p class="error" role="alert">{{ error() }}</p>
 }
 @if (loading() && !workload()) {
-  <p class="muted">Loading…</p>
+  <p class="loading"><span class="spinner"></span>Loading…</p>
 }
 
 @if (workload(); as w) {
   <section class="grid cols-4 summary" aria-label="Workload">
     <div class="card stat" [class.alert]="w.unassignedClaims > 0">
+      <span class="stat-icon"><app-icon name="alert" /></span>
       <span class="value" data-testid="unassigned">{{ w.unassignedClaims }}</span>
       <span class="label">Unassigned</span>
     </div>
-    <div class="card stat">
+    <div class="card stat tone-brand">
+      <span class="stat-icon"><app-icon name="file" /></span>
       <span class="value" data-testid="open">{{ w.totalOpenClaims }}</span>
       <span class="label">Open claims</span>
     </div>
-    <div class="card stat"><span class="value">{{ w.submitted }}</span><span class="label">Submitted</span></div>
-    <div class="card stat"><span class="value">{{ w.underReview }}</span><span class="label">Under review</span></div>
-    <div class="card stat"><span class="value">{{ w.awaitingInformation }}</span><span class="label">Awaiting information</span></div>
-    <div class="card stat"><span class="value">{{ w.approved }}</span><span class="label">Approved, unpaid</span></div>
-    <div class="card stat"><span class="value">{{ w.rejected }}</span><span class="label">Rejected</span></div>
-    <div class="card stat"><span class="value">{{ w.settled }}</span><span class="label">Settled</span></div>
+    <div class="card stat tone-info">
+      <span class="stat-icon"><app-icon name="inbox" /></span>
+      <span class="value">{{ w.submitted }}</span><span class="label">Submitted</span>
+    </div>
+    <div class="card stat tone-info">
+      <span class="stat-icon"><app-icon name="clock" /></span>
+      <span class="value">{{ w.underReview }}</span><span class="label">Under review</span>
+    </div>
+    <div class="card stat tone-warn">
+      <span class="stat-icon"><app-icon name="user" /></span>
+      <span class="value">{{ w.awaitingInformation }}</span><span class="label">Awaiting information</span>
+    </div>
+    <div class="card stat tone-ok">
+      <span class="stat-icon"><app-icon name="check" /></span>
+      <span class="value">{{ w.approved }}</span><span class="label">Approved, unpaid</span>
+    </div>
+    <div class="card stat tone-danger">
+      <span class="stat-icon"><app-icon name="alert" /></span>
+      <span class="value">{{ w.rejected }}</span><span class="label">Rejected</span>
+    </div>
+    <div class="card stat tone-ok">
+      <span class="stat-icon"><app-icon name="shield" /></span>
+      <span class="value">{{ w.settled }}</span><span class="label">Settled</span>
+    </div>
   </section>
 }
 
 @if (liability(); as l) {
   <section class="card">
-    <h2>Outstanding liability</h2>
+    <h2><app-icon name="chart" />Outstanding liability</h2>
     <p class="muted">
       Pending = claimed on claims not yet decided. Approved = decided but not yet paid out. The backend records no currency, so
       figures are shown per market; the total below adds markets together without conversion.
@@ -49,9 +69,15 @@
         <tbody>
           @for (line of l.byMarket; track line.key) {
             <tr>
-              <th scope="row">{{ line.key }}</th>
-              <td class="num">{{ line.pendingExposure | amount }}</td>
-              <td class="num">{{ line.approvedAwaitingSettlement | amount }}</td>
+              <th scope="row"><abbr [title]="marketName(line.key)">{{ line.key }}</abbr></th>
+              <td class="num">
+                {{ line.pendingExposure | amount }}
+                <div class="bar" aria-hidden="true"><span [style.width.%]="share(line.pendingExposure)"></span></div>
+              </td>
+              <td class="num">
+                {{ line.approvedAwaitingSettlement | amount }}
+                <div class="bar ok" aria-hidden="true"><span [style.width.%]="shareApproved(line.approvedAwaitingSettlement)"></span></div>
+              </td>
             </tr>
           } @empty {
             <tr><td colspan="3" class="empty">No open claims.</td></tr>
@@ -91,7 +117,7 @@
 
 @if (workload()) {
   <section class="card">
-    <h2>Officer performance</h2>
+    <h2><app-icon name="user" />Officer performance</h2>
     <div class="table-wrap">
       <table data-testid="officers">
         <thead>

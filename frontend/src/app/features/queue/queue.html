@@ -3,24 +3,29 @@
     <h1>Work queue</h1>
     <p class="muted">Submitted claims nobody has picked up yet — the longest-waiting is first.</p>
   </div>
-  <button type="button" (click)="load()" [disabled]="loading()">{{ loading() ? 'Refreshing…' : 'Refresh' }}</button>
+  <button type="button" (click)="load()" [disabled]="loading()"><app-icon name="refresh" />{{ loading() ? 'Refreshing…' : 'Refresh' }}</button>
 </div>
 
 @if (notice(); as n) {
   <p class="success" role="status">
-    You picked up {{ n.claimNumber }}. <a [routerLink]="['/claims', n.id]">Open it to start the review</a>
+    <app-icon name="check" />
+    <span>You picked up {{ n.claimNumber }}. <a [routerLink]="['/claims', n.id]">Open it to start the review</a></span>
   </p>
 }
 @if (error()) {
   <p class="error" role="alert">{{ error() }}</p>
 }
 @if (loading() && !result()) {
-  <p class="muted">Loading…</p>
+  <p class="loading"><span class="spinner"></span>Loading…</p>
 }
 
 @if (result(); as r) {
   @if (r.content.length === 0) {
-    <div class="card empty"><p>The queue is empty — nothing is waiting for an officer.</p></div>
+    <div class="card empty-state">
+      <div class="empty-icon"><app-icon name="inbox" /></div>
+      <h2>The queue is empty</h2>
+      <p>The queue is empty — nothing is waiting for an officer.</p>
+    </div>
   } @else {
     <div class="card table-wrap">
       <table>
@@ -37,11 +42,11 @@
         <tbody>
           @for (c of r.content; track c.id) {
             <tr>
-              <td><a [routerLink]="['/claims', c.id]">{{ c.claimNumber }}</a></td>
-              <td>{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }}</td>
+              <td><a class="claim-link" [routerLink]="['/claims', c.id]">{{ c.claimNumber }}</a></td>
+              <td><span class="type-tag"><app-icon [name]="c.claimType === 'MOTOR' ? 'car' : 'home'" />{{ c.claimType === 'MOTOR' ? 'Motor' : 'Property' }}</span></td>
               <td>{{ c.claimantName }}</td>
               <td class="num">{{ c.amountClaimed | amount }} <span class="muted">{{ c.market }}</span></td>
-              <td class="nowrap">{{ c.createdAt | date: 'medium' }}</td>
+              <td class="nowrap">{{ c.createdAt | date: 'medium' }}<span class="sub">{{ waiting(c.createdAt) }} ago</span></td>
               <td class="right">
                 @if (isOfficer()) {
                   <button type="button" class="primary" [disabled]="busyId() === c.id" (click)="pickUp(c)">

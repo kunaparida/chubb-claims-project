@@ -3,9 +3,11 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
+import { elapsedLabel } from '../../core/dates';
 import { Claim, PageResponse } from '../../core/models';
 import { problemMessage } from '../../core/problem';
 import { AmountPipe } from '../../shared/amount.pipe';
+import { Icon } from '../../shared/icon';
 
 const PAGE_SIZE = 10;
 
@@ -15,12 +17,15 @@ const PAGE_SIZE = 10;
  */
 @Component({
   selector: 'app-queue',
-  imports: [RouterLink, DatePipe, AmountPipe],
+  imports: [RouterLink, DatePipe, AmountPipe, Icon],
   templateUrl: './queue.html',
 })
 export class Queue implements OnInit {
   private readonly api = inject(ApiService);
   private readonly auth = inject(AuthService);
+
+  /** "3 h", "2 days": how long a claim has been waiting. */
+  protected readonly waiting = (iso: string): string => elapsedLabel(iso);
 
   protected readonly isOfficer = computed(() => this.auth.user()?.role === 'OFFICER');
   protected readonly page = signal(0);

@@ -14,7 +14,7 @@ Files that make this work: `docker-compose.yml` (root), `backend/Dockerfile`, `f
 > **Status of these files (read this first).** They were written and reviewed against the project's code and Spring Boot / Angular / Kafka
 > conventions, but **Docker was not available to the AI that wrote them, so it never built an image or started a container.** The
 > author has since edited the compose file (a restart policy on the backend, and H2 console settings that are now off by default), but no
-> run result is recorded anywhere. The backend and frontend themselves were built and tested (85 and 216 tests), and the Kafka path has only ever been
+> run result is recorded anywhere. The backend and frontend themselves were built and tested (117 and 312 tests), and the Kafka path has only ever been
 > unit-tested against a mocked `KafkaTemplate`. Part 5 below is how you prove it for real; if a step fails, [part 8](#8-troubleshooting)
 > and `docker compose logs` will say why, and please record the result in `AI_JOURNAL.md` (entry F5).
 
@@ -256,6 +256,7 @@ What was checked in the code (`application.properties`, `KafkaEventPublisher`, `
 | Build error `npm ci` ... `EBADENGINE` or `npm ERR! code ...` | The Node version in `frontend/Dockerfile` must satisfy Angular 22 (22.22.3+, 24.15+ or 26+). Check `docker run --rm node:24-slim node --version` |
 | Build error `dist/claim-management-ui/browser: not found` | The Angular output path changed. Check `angular.json` and update the `COPY --from=build` line in `frontend/Dockerfile` |
 | No events appear in the consumer | Check `docker compose logs backend` for `Publishing outbox event ... failed`; check `EVENTS_PUBLISHER` is `kafka` (`docker compose exec backend printenv EVENTS_PUBLISHER`) |
+| Attaching a document in the app fails with `413` and no message, although the file is under 5 MB | A proxy in front of the app is limiting request size. The bundled `frontend/nginx.conf` allows 7 MB (`client_max_body_size 7m`, for the backend's 5 MB file plus overhead); nginx's own default is 1 MB. If you put another gateway in front, raise its limit too. Not yet confirmed in a running container, like the rest of this stack |
 | Slow first build / out of disk | `docker system df`; free space with `docker system prune` (it removes unused images and build cache; read the prompt before confirming) |
 | Everything is gone after a restart | By design: in-memory database and no Kafka volume (part 6) |
 

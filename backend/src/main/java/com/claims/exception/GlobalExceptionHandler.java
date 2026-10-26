@@ -5,6 +5,7 @@ import java.net.URI;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -14,6 +15,9 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.security.access.AccessDeniedException;
 
@@ -62,7 +66,26 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     ResponseEntity<ProblemDetail> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex, HttpServletRequest request) {
-        return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json", request.getRequestURI());
+        boolean fileUpload = ex.getSupportedMediaTypes().stream().anyMatch(type -> type.isCompatibleWith(MediaType.MULTIPART_FORM_DATA));
+        return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                fileUpload ? "Content-Type must be multipart/form-data" : "Content-Type must be application/json", request.getRequestURI());
+    }
+
+    /** The web server stopped an upload that is bigger than the configured limit, before the service could look at it. */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ProblemDetail> handleUploadTooLarge(MaxUploadSizeExceededException ex, HttpServletRequest request) {
+        return problem(HttpStatus.PAYLOAD_TOO_LARGE, "The uploaded file is larger than the size limit", request.getRequestURI());
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    ResponseEntity<ProblemDetail> handleMissingPart(MissingServletRequestPartException ex, HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST,
+                "A file is required in the \"" + ex.getRequestPartName() + "\" field of a multipart/form-data request", request.getRequestURI());
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    ResponseEntity<ProblemDetail> handleNotMultipart(MultipartException ex, HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, "The request must be multipart/form-data containing a file", request.getRequestURI());
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

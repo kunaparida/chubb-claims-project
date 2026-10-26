@@ -9,6 +9,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 class GlobalExceptionHandlerTest {
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
@@ -49,6 +52,40 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, response.getStatusCode());
         assertEquals("Content-Type must be application/json", response.getBody().getDetail());
+    }
+
+    @Test
+    void namesMultipartWhenThatIsWhatTheEndpointAccepts() {
+        var exception = new HttpMediaTypeNotSupportedException(MediaType.APPLICATION_JSON, java.util.List.of(MediaType.MULTIPART_FORM_DATA));
+        var response = handler.handleMediaTypeNotSupported(exception, request("/api/claims/1/documents"));
+
+        assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, response.getStatusCode());
+        assertEquals("Content-Type must be multipart/form-data", response.getBody().getDetail());
+    }
+
+    @Test
+    void reportsAnUploadOverTheServerLimitAs413() {
+        var response = handler.handleUploadTooLarge(new MaxUploadSizeExceededException(5_242_880), request("/api/claims/1/documents"));
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        assertEquals("The uploaded file is larger than the size limit", response.getBody().getDetail());
+    }
+
+    @Test
+    void asksForTheFileWhenThePartIsMissing() {
+        var response = handler.handleMissingPart(new MissingServletRequestPartException("file"), request("/api/claims/1/documents"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertTrue(response.getBody().getDetail().contains("\"file\" field"));
+    }
+
+    @Test
+    void asksForMultipartWhenTheRequestIsNotMultipart() {
+        var response = handler.handleNotMultipart(new MultipartException("Current request is not a multipart request"),
+                request("/api/claims/1/documents"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("The request must be multipart/form-data containing a file", response.getBody().getDetail());
     }
 
     @Test

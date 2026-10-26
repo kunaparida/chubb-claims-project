@@ -1,5 +1,5 @@
 import { claim } from '../testing';
-import { ClaimActionId, NOTE_ACTIONS, Viewer, allowedActions, isTerminal } from './claim-actions';
+import { ClaimActionId, NOTE_ACTIONS, Viewer, allowedActions, canAddDocuments, isTerminal } from './claim-actions';
 import { CLAIM_STATUSES, ClaimStatus } from './models';
 
 /**
@@ -115,5 +115,27 @@ describe('allowedActions', () => {
 
   it('the note-carrying actions are exactly those the backend gives a NoteRequest', () => {
     expect([...NOTE_ACTIONS].sort()).toEqual(['APPROVE', 'REJECT', 'REQUEST_INFO', 'SETTLE']);
+  });
+});
+
+describe('canAddDocuments', () => {
+  it('lets the claimant who owns the claim attach documents on every open status', () => {
+    for (const status of CLAIM_STATUSES.filter((s) => !isTerminal(s))) {
+      expect(canAddDocuments(withStatus(status, null), CLAIMANT_OWNER), status).toBe(true);
+    }
+  });
+
+  it('closes once the claim is rejected or settled, as on the backend', () => {
+    for (const status of ['REJECTED', 'SETTLED'] as const) {
+      expect(canAddDocuments(withStatus(status, null), CLAIMANT_OWNER), status).toBe(false);
+    }
+  });
+
+  it('never lets another claimant, an officer or a manager attach documents', () => {
+    for (const status of CLAIM_STATUSES) {
+      for (const viewer of [CLAIMANT_OTHER, OFFICER_ME, MANAGER]) {
+        expect(canAddDocuments(withStatus(status, ASSIGNED_TO_ME), viewer), `${viewer.role} on ${status}`).toBe(false);
+      }
+    }
   });
 });

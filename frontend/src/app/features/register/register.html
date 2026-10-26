@@ -1,18 +1,24 @@
-<div class="login-wrap">
-  <form class="card login" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+<app-auth-shell>
+  <form class="auth-card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <app-logo class="auth-mark" />
     <h1>Create an account</h1>
     <p class="muted">Register as a claimant to report and track claims.</p>
 
     <label for="fullName">Full name</label>
-    <input id="fullName" formControlName="fullName" autocomplete="name" />
+    <input id="fullName" formControlName="fullName" autocomplete="name" placeholder="Jane Claimant" />
     @if (problem('fullName')) { <p class="field-error">{{ problem('fullName') }}</p> }
 
     <label for="email">Email</label>
-    <input id="email" type="email" formControlName="email" autocomplete="username" />
+    <input id="email" type="email" formControlName="email" autocomplete="username" placeholder="you@example.com" />
     @if (problem('email')) { <p class="field-error">{{ problem('email') }}</p> }
 
-    <label for="password">Password <span class="muted">(8–72 characters)</span></label>
-    <input id="password" type="password" formControlName="password" autocomplete="new-password" />
+    <label for="password">Password <span class="label-hint">(8–72 characters)</span></label>
+    <div class="password-field">
+      <input id="password" [type]="showPassword() ? 'text' : 'password'" formControlName="password" autocomplete="new-password" />
+      <button type="button" (click)="showPassword.set(!showPassword())" [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'">
+        <app-icon [name]="showPassword() ? 'eye-off' : 'eye'" />
+      </button>
+    </div>
     @if (problem('password')) { <p class="field-error">{{ problem('password') }}</p> }
 
     @if (error()) {
@@ -23,6 +29,6 @@
       {{ busy() ? 'Creating account…' : 'Create account' }}
     </button>
 
-    <p class="muted center">Already registered? <a routerLink="/login">Sign in</a></p>
+    <p class="muted center alt">Already registered? <a routerLink="/login">Sign in</a></p>
   </form>
-</div>
+</app-auth-shell>

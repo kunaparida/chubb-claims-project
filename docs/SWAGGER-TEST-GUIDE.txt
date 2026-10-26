@@ -174,6 +174,48 @@ STEP 12 Claimant cannot see the staff queue (negative test)
   ENDPOINT : GET /api/claims/queue
   EXPECTED : 403 Forbidden.
 
+STEP 12A Attach a document - optional feature        (Authorize as CLAIMANT)
+  ENDPOINT : POST /api/claims/1/documents      (multipart/form-data, field "file")
+  HOW      : In Swagger click "Try it out", use "Choose File" to pick a small
+             PDF, PNG or JPG (at most 5 MB), then Execute. Or from a shell:
+             curl -H "Authorization: Bearer <token>" -F "file=@estimate.pdf" http://localhost:8080/api/claims/1/documents
+  EXPECTED : 201 Created with a Location header ending /api/claims/1/documents/1
+             and a body of id, fileName, contentType, sizeBytes, uploadedAt
+             and uploadedByName ("Jane Doe").
+  DESC      : "Documents are optional and never block a claim. The type is
+             decided from the file's contents, not from its name."
+
+STEP 12B Refused uploads (negative tests)             (as CLAIMANT, claim 1)
+  - A text file (anything that is not a PDF, JPG or PNG)
+      EXPECTED : 415, detail: "notes.txt" is not a PDF, JPG or PNG file
+  - A PNG image renamed to disguise.pdf
+      EXPECTED : 415, detail: "disguise.pdf" is a PNG file but its name says
+                 otherwise; rename it with the right ending
+  - An empty file
+      EXPECTED : 400, detail: "empty.pdf" is empty
+  - A file larger than 5 MB (try about 6 MB)
+      EXPECTED : 413, detail: The uploaded file is larger than the size limit
+      (checked with curl; a browser-based Swagger "Try it out" with a file this
+       large was not tried)
+  - A sixth file on the same claim (after five were attached)
+      EXPECTED : 409, detail: A claim can have at most 5 documents
+  DESC      : "Every refusal explains itself, so the UI can show the reason."
+
+STEP 12C List and download                             (as CLAIMANT)
+  ENDPOINT : GET /api/claims/1/documents
+  EXPECTED : 200 OK, details only (no file bytes), oldest first.
+  ENDPOINT : GET /api/claims/1/documents/1
+  EXPECTED : 200 OK, the file itself. Content-Disposition is "attachment" and
+             X-Content-Type-Options is "nosniff", so a browser saves the file
+             instead of running it. Swagger shows a "Download file" link.
+
+STEP 12D Who may do what with documents (negative tests)
+  - As OFFICER:  POST /api/claims/1/documents  -> 403 (only the claimant attaches)
+  - As OFFICER:  GET  /api/claims/1/documents  -> 200 (anyone who can see the
+                 claim can read its documents; claim 1 is still unassigned)
+  - As a second registered claimant: GET /api/claims/1/documents -> 404
+    (the claim's existence is not revealed)
+  - No token: GET /api/claims/1/documents -> 401
 =====================================================================
  PHASE 3 - OFFICER PICKS UP WORK      (Authorize as OFFICER)
 =====================================================================
@@ -287,6 +329,13 @@ STEP 23 Invalid transition (negative test)
              APPROVED or REJECTED; MORE_INFO back to UNDER_REVIEW;
              APPROVED to SETTLED. REJECTED and SETTLED are final."
 
+STEP 23A Documents on a closed claim (negative test)  (as CLAIMANT)
+  ENDPOINT : POST /api/claims/1/documents      (any small PDF)
+  EXPECTED : 409 Conflict, detail: Documents can no longer be added: this claim
+             is settled.
+  ENDPOINT : GET /api/claims/1/documents
+  EXPECTED : 200 OK - the documents attached earlier are still there.
+  DESC      : "A closed claim keeps its documents but takes no new ones."
 =====================================================================
  PHASE 5 - REJECTION PATH (claim 2)           (as OFFICER)
 =====================================================================
@@ -355,6 +404,7 @@ STEP 31 Database
     SELECT * FROM users;
     SELECT * FROM claims;
     SELECT * FROM claim_status_history ORDER BY id;
+    SELECT id, claim_id, file_name, content_type, size_bytes FROM claim_documents ORDER BY id;
     SELECT * FROM outbox_events ORDER BY id;
   DESC: "The history table is the audit trail. The outbox table holds
        one ClaimStatusChanged event per status change, written in the
@@ -382,6 +432,9 @@ STEP 32 Events
  any     GET    /api/claims?status=&page=&size= -
  any     GET    /api/claims/{id}               -
  any     GET    /api/claims/{id}/history       -
+ claim.  POST   /api/claims/{id}/documents     multipart field "file" (PDF/JPG/PNG, 5 MB)
+ any     GET    /api/claims/{id}/documents     -
+ any     GET    /api/claims/{id}/documents/{documentId}   -
  off/mgr GET    /api/claims/queue?page=&size=  -
  officer PUT    /api/claims/{id}/pickup        -
  off/mgr PUT    /api/claims/{id}/assign        {"officerId": n}
@@ -408,5 +461,7 @@ STEP 32 Events
    401 on /h2-console -> the console is off; start the backend with H2_CONSOLE_ENABLED=true.
    409 on a status call -> the claim is not in the right status; read
                         "detail" in the response.
+   413 / 415 on a document -> the file is over 5 MB, or is not really a PDF,
+                        JPG or PNG (the contents are checked, not the name).
    400 on create     -> read the "errors" map; check claimantEmail
                         equals the logged-in account.

@@ -21,9 +21,9 @@ One repository, two applications, one set of documents:
 | Task | Command (run from the folder shown) |
 |---|---|
 | Run the backend (port 8080) | `mvn spring-boot:run` in `backend/` |
-| Backend tests (85) and coverage report | `mvn test` in `backend/` |
+| Backend tests (117) and coverage report | `mvn test` in `backend/` |
 | Run the UI (port 4200, proxies `/api` to 8080) | `npm install` once, then `npm start` in `frontend/` |
-| UI tests (216) and production build | `npm test -- --no-watch`, `npm run build` in `frontend/` |
+| UI tests (312) and production build | `npm test -- --no-watch`, `npm run build` in `frontend/` |
 | Everything in containers (Kafka included) | `docker compose up --build -d` in the repository root, then see `DOCKER.md` |
 
 ## Rules that apply to everything
@@ -47,5 +47,9 @@ One repository, two applications, one set of documents:
    PostgreSQL is *not* used and has no driver in `pom.xml`; do not add one unless asked. The H2 console (`/h2-console`) is **off by
    default** (`H2_CONSOLE_ENABLED=true` turns it on, and `SecurityConfig` then opens it); it needs no token, so local development only.
 9. **New or changed endpoints are documented in the same change.** Every controller method needs an `@Operation` summary and its error
-   `@ApiResponse`s, request fields need `@Schema` examples, and `ApiContractTest` (which also pins the endpoint count at 19) must be
+   `@ApiResponse`s, request fields need `@Schema` examples, and `ApiContractTest` (which also pins the endpoint count at 22) must be
    updated. Creating a resource returns `201` with a `Location` header.
+10. **Claim documents have limits in three places that must agree:** the backend (`app.documents.*` and `spring.servlet.multipart.*`:
+    5 files, 5 MB each, PDF/JPG/PNG), the UI's copy (`frontend/src/app/core/documents.ts`) and nginx (`client_max_body_size` in
+    `frontend/nginx.conf`). Change all three together; the backend is the one that decides, and it checks the file's real type from its
+    first bytes, never its name.

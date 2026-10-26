@@ -106,6 +106,17 @@ export interface ClaimHistoryEntry {
   changedAt: string;
 }
 
+/** A file attached to a claim. The bytes are fetched separately (downloadDocument). */
+export interface ClaimDocument {
+  id: number;
+  fileName: string;
+  /** application/pdf, image/jpeg or image/png: decided by the backend from the file's contents. */
+  contentType: string;
+  sizeBytes: number;
+  /** ISO instant. */
+  uploadedAt: string;
+  uploadedByName: string;
+}
 export interface PageResponse<T> {
   content: T[];
   /** 0-based. */

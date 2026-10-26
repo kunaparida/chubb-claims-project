@@ -19,15 +19,20 @@ The **backend is finished and is the owner of the API contract.** This folder on
 | Swagger UI | `http://localhost:8080/swagger-ui/index.html` (OpenAPI JSON: `/v3/api-docs`) |
 | Backend docs | the root `README.md` and `ARCHITECTURE.md` (part B), `../docs/SWAGGER-TEST-GUIDE.txt`, `../backend/postman/Claims-Management.postman_collection.json` |
 
-### Current state (as of 2026-10-23)
+### Current state (as of 2026-10-26)
 
-**All 19 backend endpoints are integrated** and every screen in the brief→UI checklist below exists. Verified three ways:
-216 unit tests (Vitest, mocked HTTP) · a 28-step scripted lifecycle against the **real running backend** through the dev proxy ·
-a manual browser walkthrough (register → report → pick up → review → request info → answer → dashboard).
-`npm run build` is clean (≈293 kB initial, one lazy chunk per page).
+**All 22 backend endpoints are integrated** (19 claim-workflow and auth endpoints, plus 3 for optional claim documents) and every screen in
+the brief→UI checklist below exists. Verified three ways:
+312 unit tests (Vitest, mocked HTTP) across 20 spec files · a 28-step scripted lifecycle against the **real running backend** through the dev proxy (run
+before the document endpoints were added; the documents were exercised against the real backend separately, by live API probes and in the browser) ·
+a manual browser walkthrough (register → report → pick up → review → request info → answer → dashboard; and report with documents → claim page →
+download → officer's read-only view).
+`npm run build` is clean (≈316 kB initial, one lazy chunk per page). The screens were redesigned on 2026-10-26 (see *Look and feel* below)
+and looked at in a browser in light mode, dark mode and at phone width.
 
 Not yet verified in a real browser: officer approve/reject/settle and the manager's assign picker (covered by unit tests and the
-scripted API run), dark mode, and narrow/mobile layouts. In Docker, `Dockerfile` and `nginx.conf` here serve the production build and forward
+scripted API run); dark mode and phone width were checked by eye, not systematically, and there is no accessibility audit. Files were handed to
+the report form by a script (the built-in browser has no file chooser), so the real chooser dialog and drag-and-drop were not exercised. In Docker, `Dockerfile` and `nginx.conf` here serve the production build and forward
 `/api` to the backend (see `../DOCKER.md`); no run result of that stack is recorded yet.
 
 ### Layout of `src/app`
@@ -35,9 +40,13 @@ scripted API run), dark mode, and narrow/mobile layouts. In Docker, `Dockerfile`
 ```
 core/       models.ts (API types) · api.service.ts (the ONLY file with URLs) · auth.service.ts · auth.interceptor.ts
             guards.ts · problem.ts (error → message) · claim-actions.ts (THE action table)
-shared/     status-badge.ts · amount.pipe.ts
-shell/      signed-in frame + role navigation (calls GET /api/auth/me on load to re-validate the session)
+            claim-progress.ts (stages shown on a claim page) · markets.ts (the six markets) · dates.ts (7-day window, "3 h ago")
+            policy-number.ts (generated policy reference) · documents.ts (attachment limits + the check that explains a refused file)
+            save-file.ts (FileSaver: saves a downloaded Blob) · flash.ts (one message shown once on the next page)
+shared/     status-badge.ts · amount.pipe.ts · icon.ts (SVG icons) · logo.ts (brand mark) · auth-shell.ts (sign-in frame)
+shell/      signed-in frame (header, role navigation, user chip); calls GET /api/auth/me on load to re-validate the session
 features/   login · register · claims (list, new-claim, claim-detail) · queue · dashboard
+styles.css  the design system: tokens, light/dark themes, every shared class (components have no styles of their own)
 testing.ts  fixtures for specs only (excluded from the app build)
 ```
 
@@ -90,6 +99,9 @@ Seeded local accounts: `manager@claims.local` and `officer@claims.local`, passwo
 | `GET /api/claims/queue?page&size` | OFFICER, MANAGER | Unassigned `SUBMITTED` claims, **oldest first** |
 | `GET /api/claims/{id}` | any | Claimant: only own. Officer: unassigned or own. Otherwise **404**. |
 | `GET /api/claims/{id}/history` | same as view | `ClaimHistoryResponse[]` audit trail |
+| `POST /api/claims/{id}/documents` | CLAIMANT (owner), claim not `REJECTED`/`SETTLED` | `multipart/form-data`, ONE file in field `file` → `ClaimDocumentResponse` (201). 5 files max per claim, 5 MB each, PDF/JPG/PNG (type judged from the file's bytes). 400 empty/nameless, 409 closed or full, 413 too big, 415 wrong type |
+| `GET /api/claims/{id}/documents` | same as view | `ClaimDocumentResponse[]`, details only |
+| `GET /api/claims/{id}/documents/{documentId}` | same as view | the file's bytes (`responseType: 'blob'`; a failure's JSON arrives inside the Blob, see `readBlobProblem`) |
 | `PUT /api/claims/{id}/pickup` | OFFICER | no body; assigns the claim to the caller |
 | `PUT /api/claims/{id}/assign` | OFFICER, MANAGER | `{officerId}`. Officer: only to self (else 403). Manager: any officer. |
 | `PUT /api/claims/{id}/review` | assigned OFFICER, MANAGER | no body; → `UNDER_REVIEW` |
@@ -115,6 +127,7 @@ CreateClaimRequest   { policyNumber(≤64), claimantName(≤120), claimantEmail(
                        incidentDate(not future), description(20–4000 chars), amountClaimed(>0, ≤2 decimals),
                        claimType, market(^[A-Za-z]{2}$) }
 ClaimHistoryResponse { id, fromStatus|null, toStatus, changedById, changedByName, note|null, changedAt }
+ClaimDocumentResponse { id, fileName, contentType, sizeBytes, uploadedAt, uploadedByName }
 PageResponse<T>      { content:T[], page, size, totalElements, totalPages, first, last }   // page is 0-based, size ≤ server max
 WorkloadResponse     { unassignedClaims, totalOpenClaims, submitted, underReview, awaitingInformation, approved, rejected, settled }
 LiabilityResponse    { pendingExposure, approvedAwaitingSettlement,
@@ -175,6 +188,9 @@ SUBMITTED ──review──▶ UNDER_REVIEW ──approve──▶ APPROVED ─
 The backend does **not** forbid reassigning rejected/settled claims (its own `CLAUDE.md` lists that as a known gap); the UI should
 simply not offer it.
 
+The same file has `canAddDocuments(claim, viewer)`: true only for the owning claimant while the claim is not `REJECTED` or `SETTLED`
+(what the backend allows). Everyone who can open a claim sees its documents and can download them; nobody else gets "Add documents".
+
 ## Brief → UI checklist
 
 | Brief requirement | Backend support | UI status |
@@ -183,6 +199,7 @@ simply not offer it.
 | Claimant tracks a claim (status, history) | `GET /api/claims`, `/{id}`, `/{id}/history` | done |
 | Claimant provides additional information | `PUT /{id}/provide-info` | done |
 | Claimant receives a decision | `decisionNotes` + status on the claim | done |
+| Claimant attaches supporting documents (optional; added after the brief's checklist was written) | `POST/GET /{id}/documents` | done |
 | Officer picks up incoming claims | `GET /queue`, `PUT /pickup` | done |
 | Officer reviews / assesses | `PUT /review`, `/request-info` | done |
 | Officer progresses to settlement or rejection | `PUT /approve`, `/reject`, `/settle` | done |
@@ -205,6 +222,19 @@ simply not offer it.
 8. **The action table (above) is the only place UI rules about "who can do what" live.** No role/status `if`s scattered in templates.
 9. Show amounts with their **market** next to them; never present mixed-market sums as one currency without a caveat (fact 5).
 10. Session: keep the token in memory + `localStorage`, guarded with `try/catch`; drop it when `expiresIn` has elapsed.
+11. **Look and feel (redesigned 2026-10-26).** All styling is in `src/styles.css`: use its tokens (`--primary`, `--surface`, `--border`, `--radius`,
+    ...) and existing classes (`card`, `btn`, `badge`, `chip`, `stat`, `stepper`, `timeline`, `form-section`, `empty-state`, `loading`) rather than
+    inventing colours or adding component styles; every colour must work in light and dark. Icons come from `shared/icon.ts` (add a path there,
+    not a library). Status is never shown by colour alone. Keep the markup hooks the specs rely on (`button.primary` is the submit button, `[role=alert]`
+    and `[role=status]` appear once, `h1` holds only the heading text, `.actions` holds only action buttons, `data-testid` attributes).
+12. **Rules that are UI-only live in one small file each**: the market list (`core/markets.ts`), the 7-day incident window (`core/dates.ts`), the generated
+    policy number (`core/policy-number.ts`). The backend does not enforce them (it accepts any two-letter market, any past date, any policy number), so
+    never describe them as API rules; if one must hold, it has to be added to the backend.
+13. **The report form explains every problem.** A missing or invalid required field shows its own message next to it (`aria-invalid`,
+    `aria-describedby`), an error summary (`role="alert"`) lists them as links in form order, and focus goes to the first one; server 400 `errors`
+    are shown against their fields the same way. Documents are optional and are sent after the claim is created, one request each: a failed
+    upload never undoes the claim, it is reported on the claim page (flash message) where the claimant can retry. The document limits in
+    `core/documents.ts` copy the backend's (5 files, 5 MB, PDF/JPG/PNG) so a mistake is explained before sending; the backend has the last word.
 
 ## Conventions
 

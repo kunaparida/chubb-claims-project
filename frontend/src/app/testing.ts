@@ -1,4 +1,4 @@
-import { AuthResponse, Claim, ClaimHistoryEntry, ClaimStatus, PageResponse, Role } from './core/models';
+import { AuthResponse, Claim, ClaimDocument, ClaimHistoryEntry, ClaimStatus, PageResponse, Role } from './core/models';
 
 /** Shared test fixtures (not part of the app bundle: only spec files import this). */
 
@@ -36,6 +36,18 @@ export function claim(over: Partial<Claim> = {}): Claim {
     decisionNotes: null,
     createdAt: '2026-10-11T04:00:00Z',
     updatedAt: '2026-10-11T04:00:00Z',
+    ...over,
+  };
+}
+
+export function claimDocument(over: Partial<ClaimDocument> = {}): ClaimDocument {
+  return {
+    id: 1,
+    fileName: 'repair-estimate.pdf',
+    contentType: 'application/pdf',
+    sizeBytes: 184_320,
+    uploadedAt: '2026-10-11T05:00:00Z',
+    uploadedByName: 'Chen Wei',
     ...over,
   };
 }

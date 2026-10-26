@@ -1,13 +1,19 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Observable, forkJoin } from 'rxjs';
+import { Observable, catchError, concatMap, forkJoin, from, map, of, tap, toArray } from 'rxjs';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
-import { ACTION_LABELS, ClaimActionId, NOTE_ACTIONS, STATUS_LABELS, allowedActions } from '../../core/claim-actions';
-import { Claim, ClaimHistoryEntry, OfficerPerformance } from '../../core/models';
-import { problemMessage } from '../../core/problem';
+import { ACTION_LABELS, ClaimActionId, NOTE_ACTIONS, STATUS_LABELS, allowedActions, canAddDocuments } from '../../core/claim-actions';
+import { claimProgress } from '../../core/claim-progress';
+import { DOCUMENT_ACCEPT, MAX_DOCUMENTS, checkDocument, formatBytes } from '../../core/documents';
+import { Flash } from '../../core/flash';
+import { marketName } from '../../core/markets';
+import { Claim, ClaimDocument, ClaimHistoryEntry, OfficerPerformance } from '../../core/models';
+import { problemMessage, readBlobProblem } from '../../core/problem';
+import { FileSaver } from '../../core/save-file';
 import { AmountPipe } from '../../shared/amount.pipe';
+import { Icon } from '../../shared/icon';
 import { StatusBadge } from '../../shared/status-badge';
 
 const SUCCESS: Record<ClaimActionId, string> = {
@@ -24,10 +30,11 @@ const SUCCESS: Record<ClaimActionId, string> = {
 /**
  * One page for every role. What the person can DO comes only from the central action table (`allowedActions`); the server then
  * has the last word, so every failure (403/404/409) is shown and the claim is reloaded to show its true current state.
+ * Documents: everyone who can see the claim can list and download them; only the claimant who owns it can add more.
  */
 @Component({
   selector: 'app-claim-detail',
-  imports: [RouterLink, DatePipe, AmountPipe, StatusBadge],
+  imports: [RouterLink, DatePipe, AmountPipe, StatusBadge, Icon],
   templateUrl: './claim-detail.html',
 })
 export class ClaimDetail {
@@ -36,9 +43,15 @@ export class ClaimDetail {
 
   private readonly api = inject(ApiService);
   private readonly auth = inject(AuthService);
+  private readonly flash = inject(Flash);
+  private readonly fileSaver = inject(FileSaver);
 
   protected readonly labels = ACTION_LABELS;
   protected readonly statusLabels = STATUS_LABELS;
+  protected readonly marketName = marketName;
+  protected readonly formatSize = formatBytes;
+  protected readonly accept = DOCUMENT_ACCEPT;
+  protected readonly maxDocuments = MAX_DOCUMENTS;
 
   protected readonly claim = signal<Claim | null>(null);
   protected readonly history = signal<ClaimHistoryEntry[]>([]);
@@ -47,6 +60,12 @@ export class ClaimDetail {
   protected readonly actionError = signal<string | null>(null);
   protected readonly message = signal<string | null>(null);
   protected readonly busy = signal(false);
+
+  protected readonly documents = signal<ClaimDocument[]>([]);
+  protected readonly documentProblems = signal<string[]>([]);
+  protected readonly downloadingId = signal<number | null>(null);
+  protected readonly newFiles = signal<File[]>([]);
+  protected readonly uploading = signal(false);
 
   protected readonly note = signal('');
   protected readonly response = signal('');
@@ -58,6 +77,18 @@ export class ClaimDetail {
     return claim && user ? allowedActions(claim, { id: user.id, role: user.role }) : [];
   });
   protected readonly noteActions = computed(() => this.actions().filter((a) => NOTE_ACTIONS.includes(a)));
+  /** Where the claim is in its life, as a few labelled stages. Presentation only; it grants nothing. */
+  protected readonly progress = computed(() => {
+    const claim = this.claim();
+    return claim ? claimProgress(claim.status) : [];
+  });
+  /** The claimant who owns an open claim can attach more documents, up to the limit. */
+  protected readonly mayAddDocuments = computed(() => {
+    const claim = this.claim();
+    const user = this.auth.user();
+    return !!claim && !!user && canAddDocuments(claim, { id: user.id, role: user.role });
+  });
+  protected readonly roomForDocuments = computed(() => this.documents().length + this.newFiles().length < MAX_DOCUMENTS);
   protected readonly backLink = computed(() => {
     const role = this.auth.user()?.role;
     return role === 'CLAIMANT' ? '/claims' : role === 'OFFICER' ? '/queue' : '/dashboard';
@@ -131,6 +162,93 @@ export class ClaimDetail {
     });
   }
 
+  // ---- documents ----
+
+  protected download(document: ClaimDocument): void {
+    const claim = this.claim();
+    if (!claim || this.downloadingId() !== null) {
+      return;
+    }
+    this.downloadingId.set(document.id);
+    this.documentProblems.set([]);
+    this.api.downloadDocument(claim.id, document.id).subscribe({
+      next: (blob) => {
+        this.downloadingId.set(null);
+        this.fileSaver.save(blob, document.fileName);
+      },
+      error: (err: unknown) => {
+        this.downloadingId.set(null);
+        void readBlobProblem(err).then((readable) =>
+          this.documentProblems.set([problemMessage(readable, `"${document.fileName}" could not be downloaded.`)]),
+        );
+      },
+    });
+  }
+
+  protected onFileInput(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const accepted = [...this.newFiles()];
+    const problems: string[] = [];
+    for (const file of Array.from(input.files ?? [])) {
+      const problem = checkDocument(file, accepted, this.documents().length);
+      if (problem) {
+        problems.push(problem);
+      } else {
+        accepted.push(file);
+      }
+    }
+    this.newFiles.set(accepted);
+    this.documentProblems.set(problems);
+    input.value = ''; // so choosing the same file again after removing it still fires
+  }
+
+  protected removeNewFile(index: number): void {
+    this.newFiles.update((files) => files.filter((_, i) => i !== index));
+    this.documentProblems.set([]);
+  }
+
+  /** Uploads the chosen files one after the other; one failing does not stop the rest. Then the list is read again from the server. */
+  protected uploadNewFiles(): void {
+    const claim = this.claim();
+    const files = this.newFiles();
+    if (!claim || files.length === 0 || this.uploading()) {
+      return;
+    }
+    this.uploading.set(true);
+    this.documentProblems.set([]);
+    this.message.set(null);
+    from(files)
+      .pipe(
+        concatMap((file) =>
+          this.api.uploadDocument(claim.id, file).pipe(
+            map(() => null),
+            catchError((err: unknown) => {
+              const message = problemMessage(err, `"${file.name}" could not be uploaded.`);
+              return of(message.includes(file.name) ? message : `"${file.name}": ${message}`);
+            }),
+          ),
+        ),
+        toArray(),
+        tap(() => this.uploading.set(false)),
+      )
+      .subscribe((results) => {
+        const failures = results.filter((r): r is string => r !== null);
+        const attached = files.length - failures.length;
+        this.newFiles.set([]);
+        this.documentProblems.set(failures);
+        if (attached > 0) {
+          this.message.set(`${attached} document${attached === 1 ? '' : 's'} attached.`);
+        }
+        this.refreshDocuments(claim.id);
+      });
+  }
+
+  private refreshDocuments(claimId: number): void {
+    this.api.documents(claimId).subscribe({ next: (list) => this.documents.set(list), error: () => undefined });
+  }
+
+  // ---- loading ----
+
   private call(action: ClaimActionId, id: number): Observable<Claim> {
     const note = this.note().trim();
     switch (action) {
@@ -158,13 +276,28 @@ export class ClaimDetail {
       this.claim.set(null);
       this.message.set(null);
       this.actionError.set(null);
+      this.documents.set([]);
+      this.newFiles.set([]);
+      this.documentProblems.set([]);
     }
     this.loadError.set(null);
-    forkJoin({ claim: this.api.getClaim(claimId), history: this.api.history(claimId) }).subscribe({
-      next: ({ claim, history }) => {
+    forkJoin({
+      claim: this.api.getClaim(claimId),
+      history: this.api.history(claimId),
+      // a failed action reloads the claim to show its true state; the documents are not affected, so they are not fetched again
+      documents: keepMessages ? of(this.documents()) : this.api.documents(claimId).pipe(catchError(() => of([] as ClaimDocument[]))),
+    }).subscribe({
+      next: ({ claim, history, documents }) => {
         this.claim.set(claim);
         this.history.set(history);
+        this.documents.set(documents);
         this.loadOfficersIfNeeded();
+        const flash = keepMessages ? null : this.flash.take();
+        if (flash?.kind === 'success') {
+          this.message.set(flash.text);
+        } else if (flash) {
+          this.actionError.set(flash.text);
+        }
       },
       error: (err: unknown) => this.loadError.set(problemMessage(err, 'This claim could not be loaded.')),
     });

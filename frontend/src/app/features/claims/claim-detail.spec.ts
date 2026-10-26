@@ -2,8 +2,10 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { Claim, ClaimHistoryEntry, Role } from '../../core/models';
-import { buttonLabels, choose, claim, historyEntry, storeSession, type } from '../../testing';
+import { Flash, FlashMessage } from '../../core/flash';
+import { Claim, ClaimDocument, ClaimHistoryEntry, Role } from '../../core/models';
+import { FileSaver } from '../../core/save-file';
+import { buttonLabels, choose, claim, claimDocument, historyEntry, storeSession, type } from '../../testing';
 import { ClaimDetail } from './claim-detail';
 
 describe('ClaimDetail', () => {
@@ -16,13 +18,24 @@ describe('ClaimDetail', () => {
     historyEntry('UNDER_REVIEW', { id: 2, fromStatus: 'SUBMITTED', changedByName: 'Priya Nair', note: null }),
   ];
 
-  /** Opens the page as `role`, answering the claim + history requests the page makes on load. */
-  const open = async (role: Role, c: Claim, hist: ClaimHistoryEntry[] = history) => {
+  const saved: { blob: Blob; name: string }[] = [];
+
+  /** Opens the page as `role`, answering the claim, history and documents requests the page makes on load. */
+  const open = async (role: Role, c: Claim, hist: ClaimHistoryEntry[] = history, docs: ClaimDocument[] = [], flash?: FlashMessage) => {
     storeSession(role);
+    saved.length = 0;
     TestBed.configureTestingModule({
       imports: [ClaimDetail],
-      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FileSaver, useValue: { save: (blob: Blob, name: string) => saved.push({ blob, name }) } },
+      ],
     });
+    if (flash) {
+      TestBed.inject(Flash).set(flash);
+    }
     fixture = TestBed.createComponent(ClaimDetail);
     el = fixture.nativeElement;
     http = TestBed.inject(HttpTestingController);
@@ -30,6 +43,7 @@ describe('ClaimDetail', () => {
     await fixture.whenStable();
     http.expectOne(`/api/claims/${c.id}`).flush(c);
     http.expectOne(`/api/claims/${c.id}/history`).flush(hist);
+    http.expectOne(`/api/claims/${c.id}/documents`).flush(docs);
     await fixture.whenStable();
   };
   const actionButtons = () => buttonLabels(el, '.actions button');
@@ -277,4 +291,172 @@ describe('ClaimDetail', () => {
       expect(el.querySelector('h1')).toBeNull();
     });
   });
-});
+
+  describe('documents', () => {
+    const pdf = (name = 'estimate.pdf', size = 1000) => new File([new Uint8Array(size)], name, { type: 'application/pdf' });
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10)); // lets the FileReader and promise callbacks run
+        await fixture.whenStable();
+      }
+    };
+    const pick = async (files: File[]) => {
+      const input = el.querySelector<HTMLInputElement>('input[type=file]') as HTMLInputElement;
+      Object.defineProperty(input, 'files', { value: files, configurable: true });
+      input.dispatchEvent(new Event('change'));
+      await fixture.whenStable();
+    };
+    const uploadButton = () =>
+      Array.from(el.querySelectorAll<HTMLButtonElement>('button.primary')).find((b) => b.textContent?.trim().startsWith('Upload')) as HTMLButtonElement;
+    const names = (testId: string) => Array.from(el.querySelectorAll(`[data-testid=${testId}] .file-name`)).map((n) => n.textContent?.trim());
+
+    it('lists each document with its size, who added it and when', async () => {
+      await open('OFFICER', claim({ status: 'UNDER_REVIEW', assignedOfficerId: 7 }), history, [
+        claimDocument({ id: 1 }),
+        claimDocument({ id: 2, fileName: 'photo.jpg', contentType: 'image/jpeg', sizeBytes: 2_500_000, uploadedByName: 'Priya Nair' }),
+      ]);
+
+      expect(names('documents')).toEqual(['repair-estimate.pdf', 'photo.jpg']);
+      const rows = Array.from(el.querySelectorAll('[data-testid=documents] li')).map((li) => li.textContent ?? '');
+      expect(rows[0]).toContain('180 KB');
+      expect(rows[0]).toContain('Chen Wei');
+      expect(rows[1]).toContain('2.4 MB');
+      expect(rows[1]).toContain('Priya Nair');
+      expect(el.querySelector('.documents h2 .chip')?.textContent).toBe('2');
+      expect(el.querySelector('[data-testid=no-documents]')).toBeNull();
+    });
+
+    it('says so when there are none', async () => {
+      await open('MANAGER', claim({ status: 'SUBMITTED' }));
+      http.expectOne('/api/dashboard/performance').flush([]);
+      await fixture.whenStable();
+
+      expect(el.querySelector('[data-testid=no-documents]')?.textContent).toContain('No documents');
+      expect(el.querySelector('[data-testid=documents]')).toBeNull();
+    });
+
+    it('is offered for adding only to the claimant who owns an open claim', async () => {
+      await open('CLAIMANT', claim({ status: 'SUBMITTED' }));
+      expect(el.querySelector('input[type=file]')).not.toBeNull();
+      TestBed.resetTestingModule();
+
+      await open('CLAIMANT', claim({ status: 'REJECTED' }));
+      expect(el.querySelector('input[type=file]')).toBeNull();
+      TestBed.resetTestingModule();
+
+      await open('CLAIMANT', claim({ status: 'UNDER_REVIEW', claimantId: 99 }));
+      expect(el.querySelector('input[type=file]')).toBeNull();
+      TestBed.resetTestingModule();
+
+      await open('OFFICER', claim({ status: 'UNDER_REVIEW', assignedOfficerId: 7 }));
+      expect(el.querySelector('input[type=file]')).toBeNull();
+    });
+
+    it('downloads a document through the API (so the token is sent) and hands it to the browser to save', async () => {
+      await open('OFFICER', claim({ status: 'UNDER_REVIEW', assignedOfficerId: 7 }), history, [claimDocument({ id: 5, fileName: 'estimate.pdf' })]);
+      el.querySelector<HTMLButtonElement>('[data-testid=documents] button')?.click();
+      await fixture.whenStable();
+
+      const req = http.expectOne('/api/claims/42/documents/5');
+      expect(req.request.method).toBe('GET');
+      expect(req.request.responseType).toBe('blob');
+      const blob = new Blob(['%PDF-1.4']);
+      req.flush(blob);
+      await fixture.whenStable();
+
+      expect(saved).toHaveLength(1);
+      expect(saved[0].name).toBe('estimate.pdf');
+      expect(saved[0].blob).toBe(blob);
+    });
+
+    it('explains a failed download with the reason the backend gave', async () => {
+      await open('OFFICER', claim({ status: 'UNDER_REVIEW', assignedOfficerId: 7 }), history, [claimDocument({ id: 5 })]);
+      el.querySelector<HTMLButtonElement>('[data-testid=documents] button')?.click();
+      await fixture.whenStable();
+      http.expectOne('/api/claims/42/documents/5').flush(new Blob([JSON.stringify({ detail: 'Document not found' })]), { status: 404, statusText: 'Not Found' });
+      await settle();
+
+      expect(el.querySelector('[data-testid=document-problems]')?.textContent).toContain('Document not found');
+      expect(saved).toHaveLength(0);
+    });
+
+    it('lets the claimant pick files, explains any that cannot be used, uploads the rest and shows the new list', async () => {
+      await open('CLAIMANT', claim({ status: 'MORE_INFO_REQUIRED', informationRequest: 'Send the estimate' }));
+      await pick([pdf('estimate.pdf'), new File(['x'], 'notes.txt')]);
+
+      expect(names('new-files')).toEqual(['estimate.pdf']);
+      expect(el.querySelector('[data-testid=document-problems]')?.textContent).toContain('"notes.txt" is not a PDF, JPG or PNG file.');
+      expect(uploadButton().textContent?.trim()).toBe('Upload 1 document');
+
+      uploadButton().click();
+      await fixture.whenStable();
+      const upload = http.expectOne('/api/claims/42/documents');
+      expect(upload.request.method).toBe('POST');
+      expect((upload.request.body as FormData).get('file')).toBeInstanceOf(File);
+      upload.flush(claimDocument({ id: 9, fileName: 'estimate.pdf' }), { status: 201, statusText: 'Created' });
+      await fixture.whenStable();
+      http.expectOne('/api/claims/42/documents').flush([claimDocument({ id: 9, fileName: 'estimate.pdf' })]);
+      await fixture.whenStable();
+
+      expect(el.querySelector('[role=status]')?.textContent).toContain('1 document attached.');
+      expect(names('documents')).toEqual(['estimate.pdf']);
+      expect(el.querySelector('[data-testid=new-files]')).toBeNull();
+      expect(el.querySelector('[data-testid=document-problems]')).toBeNull();
+    });
+
+    it('reports a file the backend refuses and still attaches the others', async () => {
+      await open('CLAIMANT', claim({ status: 'SUBMITTED' }));
+      await pick([pdf('bad.pdf'), pdf('good.pdf')]);
+      uploadButton().click();
+      await fixture.whenStable();
+
+      http.expectOne('/api/claims/42/documents').flush({ detail: '"bad.pdf" is not a PDF, JPG or PNG file' }, { status: 415, statusText: 'Unsupported Media Type' });
+      await fixture.whenStable();
+      http.expectOne('/api/claims/42/documents').flush(claimDocument({ id: 2, fileName: 'good.pdf' }), { status: 201, statusText: 'Created' });
+      await fixture.whenStable();
+      http.expectOne('/api/claims/42/documents').flush([claimDocument({ id: 2, fileName: 'good.pdf' })]);
+      await fixture.whenStable();
+
+      expect(el.querySelector('[data-testid=document-problems]')?.textContent).toContain('"bad.pdf" is not a PDF, JPG or PNG file');
+      expect(el.querySelector('[role=status]')?.textContent).toContain('1 document attached.');
+      expect(names('documents')).toEqual(['good.pdf']);
+    });
+
+    it('lets a chosen file be removed again before uploading', async () => {
+      await open('CLAIMANT', claim({ status: 'SUBMITTED' }));
+      await pick([pdf('a.pdf'), pdf('b.pdf')]);
+      expect(names('new-files')).toEqual(['a.pdf', 'b.pdf']);
+
+      el.querySelector<HTMLButtonElement>('[data-testid=new-files] button')?.click();
+      await fixture.whenStable();
+
+      expect(names('new-files')).toEqual(['b.pdf']);
+    });
+
+    it('stops offering more once the claim has the maximum of five', async () => {
+      const five = [1, 2, 3, 4, 5].map((id) => claimDocument({ id, fileName: `doc-${id}.pdf` }));
+      await open('CLAIMANT', claim({ status: 'SUBMITTED' }), history, five);
+
+      expect(el.querySelector('input[type=file]')).toBeNull();
+      expect(el.querySelector('.add-documents')?.textContent).toContain('maximum of 5 documents');
+    });
+
+    it('does not count documents already on the claim as free room when choosing more', async () => {
+      const four = [1, 2, 3, 4].map((id) => claimDocument({ id, fileName: `doc-${id}.pdf` }));
+      await open('CLAIMANT', claim({ status: 'SUBMITTED' }), history, four);
+      await pick([pdf('five.pdf'), pdf('six.pdf')]);
+
+      expect(names('new-files')).toEqual(['five.pdf']);
+      expect(el.querySelector('[data-testid=document-problems]')?.textContent).toContain('up to 5 documents');
+    });
+
+    it('shows the result of the uploads made while the claim was being submitted, once', async () => {
+      await open('CLAIMANT', claim({ status: 'SUBMITTED' }), history, [claimDocument()], { kind: 'success', text: 'Claim submitted with 1 document.' });
+      expect(el.querySelector('[role=status]')?.textContent).toContain('Claim submitted with 1 document.');
+      expect(TestBed.inject(Flash).take()).toBeNull();
+      TestBed.resetTestingModule();
+
+      await open('CLAIMANT', claim({ status: 'SUBMITTED' }), history, [], { kind: 'warning', text: 'Your claim was submitted, but 1 of 2 documents could not be attached.' });
+      expect(el.querySelector('[role=alert]')?.textContent).toContain('could not be attached');
+    });
+  });});

@@ -1,13 +1,19 @@
-<div class="login-wrap">
-  <form class="card login" [formGroup]="form" (ngSubmit)="submit()" novalidate>
-    <h1>Claims</h1>
+<app-auth-shell>
+  <form class="auth-card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <app-logo class="auth-mark" />
+    <h1>Welcome back</h1>
     <p class="muted">Sign in to report, track or process claims.</p>
 
     <label for="email">Email</label>
-    <input id="email" type="email" formControlName="email" autocomplete="username" />
+    <input id="email" type="email" formControlName="email" autocomplete="username" placeholder="you@example.com" />
 
     <label for="password">Password</label>
-    <input id="password" type="password" formControlName="password" autocomplete="current-password" />
+    <div class="password-field">
+      <input id="password" [type]="showPassword() ? 'text' : 'password'" formControlName="password" autocomplete="current-password" />
+      <button type="button" (click)="showPassword.set(!showPassword())" [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'">
+        <app-icon [name]="showPassword() ? 'eye-off' : 'eye'" />
+      </button>
+    </div>
 
     @if (error()) {
       <p class="error" role="alert">{{ error() }}</p>
@@ -17,7 +23,7 @@
       {{ busy() ? 'Signing in…' : 'Sign in' }}
     </button>
 
-    <p class="muted center">New claimant? <a routerLink="/register">Create an account</a></p>
+    <p class="muted center alt">New claimant? <a routerLink="/register">Create an account</a></p>
 
     <details class="demo">
       <summary>Local demo accounts</summary>
@@ -31,4 +37,4 @@
       </div>
     </details>
   </form>
-</div>
+</app-auth-shell>
